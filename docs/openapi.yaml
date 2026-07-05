@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: Neytrix AI Enrollment Agent API
+  version: 1.0.0
+  description: |
+    Multi-tenant conversational AI API for youth sports enrollment.
+    Supports FAQ, eligibility checks, calendar booking, payment, and registration workflows.
+  contact:
+    name: Neytrix AI Support
+    email: support@neytrix.ai
+
+servers:
+  - url: https://api.neytrix.ai/v1
+    description: Production
+  - url: https://staging-api.neytrix.ai/v1
+    description: Staging
+
+security:
+  - TenantAuth: []
+
+paths:
+  /chat/sessions:
+    post:
+      summary: Start a new chat session
+      operationId: startChatSession
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                guardianId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                context:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /chat/sessions/{sessionId}:
+    get:
+      summary: Get session details
+      operationId: getChatSession
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /chat/sessions/{sessionId}/messages:
+    post:
+      summary: Send a message
+      operationId: sendMessage
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        '200':
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /webhooks/stripe:
+    post:
+      summary: Stripe webhook endpoint
+      operationId: stripeWebhook
+      tags: [Webhooks]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+        '400':
+          description: Invalid signature
+
+  /webhooks/google-calendar:
+    post:
+      summary: Google Calendar webhook endpoint
+      operationId: googleCalendarWebhook
+      tags: [Webhooks]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+
+components:
+  securitySchemes:
+    TenantAuth:
+      type: apiKey
+      in: header
+      name: X-Tenant-Slug
+      description: Tenant identifier for multi-tenancy isolation
+
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Chat session identifier
+
+  schemas:
+    ChatSession:
+      type: object
+      required: [id, tenantId, state, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        guardianId:
+          type: string
+          format: uuid
+          nullable: true
+        state:
+          type: string
+          enum: [greeting, collecting_guardian, collecting_player, matching_programs, booking_slot, collecting_payment, confirming, completed, escalated]
+        context:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MessageResponse:
+      type: object
+      required: [message, toolCalls]
+      properties:
+        message:
+          type: string
+          description: Agent's response text
+        toolCalls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        state:
+          type: string
+          description: Updated session state
+        escalated:
+          type: boolean
+          default: false
+
+    ToolCall:
+      type: object
+      required: [tool, args]
+      properties:
+        tool:
+          type: string
+          enum: [
+            answer_faq,
+            upsert_guardian,
+            add_player,
+            match_programs,
+            find_slots,
+            book_slot,
+            generate_waiver,
+            create_payment,
+            create_registration,
+            escalate_to_human,
+            check_registration_status
+          ]
+        args:
+          type: object
+          additionalProperties: true
+        result:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    Guardian:
+      type: object
+      required: [email, firstName, lastName, phone]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Player:
+      type: object
+      required: [firstName, lastName, dateOfBirth, guardianId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+        dateOfBirth:
+          type: string
+          format: date
+        guardianId:
+          type: string
+          format: uuid
+        medicalNotes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Program:
+      type: object
+      required: [name, sportType, ageMin, ageMax, price]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        sportType:
+          type: string
+        ageMin:
+          type: integer
+        ageMax:
+          type: integer
+        skillLevel:
+          type: string
+          enum: [beginner, intermediate, advanced]
+          nullable: true
+        price:
+          type: number
+          format: decimal
+        capacity:
+          type: integer
+        enrolled:
+          type: integer
+        season:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+
+    Registration:
+      type: object
+      required: [tenantId, guardianId, playerId, programId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        guardianId:
+          type: string
+          format: uuid
+        playerId:
+          type: string
+          format: uuid
+        programId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        assessmentDate:
+          type: string
+          format: date-time
+          nullable: true
+        waiverUrl:
+          type: string
+          nullable: true
+        waiverSignedAt:
+          type: string
+          format: date-time
+          nullable: true
+        paymentIntentId:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [pending, waiver_signed, paid, confirmed, cancelled]
+        createdAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid tenant authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
