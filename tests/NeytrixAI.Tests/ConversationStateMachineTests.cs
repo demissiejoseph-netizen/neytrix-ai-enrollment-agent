@@ -8,13 +8,30 @@ public class ConversationStateMachineTests
     [Fact]
     public void CannotSkipConsentStep()
     {
-        // Guardian phone -> player name directly (skipping consent) is a defined
-        // path, but jumping straight from name collection to program matches is not.
+        // Jumping straight from name collection to program matches is not allowed.
         var result = ConversationStateMachine.Transition(
             ConversationState.CollectingGuardianName,
             ConversationState.ShowingProgramMatches);
 
         Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void CannotSkipConsentFromPhoneToPlayerIntake()
+    {
+        // GDPR consent is mandatory: phone collection must route through consent,
+        // never directly into player intake. This closes a fail-open hole where a
+        // driven transition could bypass consent.
+        var result = ConversationStateMachine.Transition(
+            ConversationState.CollectingGuardianPhone,
+            ConversationState.CollectingPlayerName);
+
+        Assert.False(result.IsValid);
+
+        // The only permitted onward transition is to consent collection.
+        Assert.True(ConversationStateMachine.Transition(
+            ConversationState.CollectingGuardianPhone,
+            ConversationState.CollectingGdprConsent).IsValid);
     }
 
     [Fact]

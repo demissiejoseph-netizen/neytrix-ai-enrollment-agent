@@ -80,11 +80,18 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
             return null;
 
         if (ConversationStateMachine.IsTerminal(s.State))
-            return Reply(s, "This conversation has ended. Please start a new session if you need more help.");
+            return Reply(s, "This conversation has ended. If you still need help, please start a new session and we'll pick things up from there.");
 
-        // Fail-closed safety gate: escalate to a human on any safety signal.
+        // Fail-closed safety gate: escalate to a human on any safety signal. This
+        // runs before any intake parsing so a safeguarding/medical/financial signal
+        // can never be swallowed as ordinary form input.
         if (SafetyTriage.ShouldEscalate(request.Content, out var reason))
+        {
+            _logger.LogWarning(
+                "Safety triage matched in session {Token} (tenant {TenantId}, state {State}); escalating with reason {Reason}.",
+                s.Token, s.TenantId, s.State, reason);
             return Escalate(s, reason);
+        }
 
         var message = (request.Content ?? string.Empty).Trim();
 
@@ -116,28 +123,32 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
     {
         var parts = message.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length < 2)
-            return Reply(s, "Please share both a first and last name for the guardian.");
+            return Reply(s, "Thanks! Could you share both a first and last name for the parent or guardian?");
 
         s.GuardianFirstName = parts[0];
         s.GuardianLastName = parts[1];
-        return Advance(s, ConversationState.CollectingGuardianEmail, "Thanks! What's the best email address to reach you?");
+        return Advance(s, ConversationState.CollectingGuardianEmail,
+            $"Lovely to meet you, {s.GuardianFirstName}! What's the best email address to reach you on?");
     }
 
     private ChatMessageResponse CollectGuardianEmail(Session s, string message)
     {
         if (!IsValidEmail(message))
-            return Reply(s, "That doesn't look like a valid email address. Could you re-enter it?");
+            return Reply(s, "Hmm, that doesn't look quite like an email address. Could you double-check and type it again?");
 
         s.GuardianEmail = message.ToLowerInvariant();
-        return Advance(s, ConversationState.CollectingGuardianPhone, "Great. And a contact phone number? (You can type 'skip'.)");
+        return Advance(s, ConversationState.CollectingGuardianPhone,
+            "Great, thank you. And is there a contact phone number we can reach you on? " +
+            "If you'd rather not share one, just type 'skip'.");
     }
 
     private ChatMessageResponse CollectGuardianPhone(Session s, string message)
     {
         s.GuardianPhone = message.Equals("skip", StringComparison.OrdinalIgnoreCase) ? null : message;
         return Advance(s, ConversationState.CollectingGdprConsent,
-            "Before we continue, we need your consent to store your and your child's details to process this enrolment, " +
-            "in line with our privacy policy. Do you consent? (yes/no)");
+            "Before we go any further, I need to check one important thing. To process this enrolment we'll need to store " +
+            "your details and your child's details, in line with our privacy policy. Are you happy for us to do that? " +
+            "Please reply 'yes' to consent, or 'no' if you'd prefer not to.");
     }
 
     private async Task<ChatMessageResponse> CollectConsentAsync(Session s, string message, CancellationToken ct)
@@ -148,39 +159,53 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
             guardian.RecordGdprConsent();
             await _guardians.CreateAsync(guardian, ct);
             s.GuardianId = guardian.Id;
-            return Advance(s, ConversationState.CollectingPlayerName, "Thank you. What is the child's (player's) full name?");
+            _logger.LogInformation(
+                "Recorded GDPR consent and stored guardian {GuardianId} in session {Token} (tenant {TenantId}).",
+                guardian.Id, s.Token, s.TenantId);
+            return Advance(s, ConversationState.CollectingPlayerName,
+                "Thank you so much. Now let's tell me about your child — what's their full name?");
         }
 
         if (IsNegative(message))
         {
-            // Fail closed: without consent we cannot store data or enrol.
+            // Fail closed: without consent we cannot store data or enrol. Audited so
+            // a refused-consent outcome is traceable later.
+            _logger.LogInformation(
+                "Guardian declined GDPR consent in session {Token} (tenant {TenantId}); ending session without storing any personal data.",
+                s.Token, s.TenantId);
             s.State = ConversationState.SessionEnded;
-            return Reply(s, "Understood. We can't proceed with enrolment without consent to store the required details. " +
-                "If you change your mind, please start a new session. Take care!");
+            return Reply(s, "That's completely fine, and thank you for letting me know. We're not able to continue with the " +
+                "enrolment without your consent to store the details, so I won't keep any of the information from this chat. " +
+                "If you change your mind, you're welcome to start again any time. Take care!");
         }
 
-        return Reply(s, "Please reply 'yes' to consent, or 'no' if you do not consent.");
+        return Reply(s, "No problem — just to confirm, are you happy for us to store these details so we can process the " +
+            "enrolment? Please reply 'yes' to consent, or 'no' if you'd prefer not to.");
     }
 
     private ChatMessageResponse CollectPlayerName(Session s, string message)
     {
         var parts = message.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length < 2)
-            return Reply(s, "Please share both a first and last name for the player.");
+            return Reply(s, "Could you share both a first and last name for your child?");
 
         s.PlayerFirstName = parts[0];
         s.PlayerLastName = parts[1];
-        return Advance(s, ConversationState.CollectingPlayerDob, "Got it. What's the player's date of birth? (YYYY-MM-DD)");
+        return Advance(s, ConversationState.CollectingPlayerDob,
+            $"Got it — I've noted your child as {s.PlayerFirstName} {s.PlayerLastName}. " +
+            "What's their date of birth? Please use the format YYYY-MM-DD (for example, 2015-06-01).");
     }
 
     private ChatMessageResponse CollectPlayerDob(Session s, string message)
     {
         if (!DateOnly.TryParse(message, out var dob) || dob >= DateOnly.FromDateTime(DateTime.UtcNow))
-            return Reply(s, "Please enter a valid past date of birth in YYYY-MM-DD format.");
+            return Reply(s, "I wasn't able to read that as a date. Could you enter your child's date of birth as YYYY-MM-DD, " +
+                "for example 2015-06-01?");
 
         s.PlayerDob = dob;
         return Advance(s, ConversationState.CollectingPlayerGender,
-            "Thanks. What's the player's gender? (male / female / non_binary / prefer_not_to_say)");
+            "Thank you. And how does your child identify? You can reply with male, female, non-binary, " +
+            "or 'prefer not to say' — whichever you're comfortable with.");
     }
 
     private async Task<ChatMessageResponse> CollectPlayerGenderAsync(Session s, string message, CancellationToken ct)
@@ -234,6 +259,15 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
 
     private ChatMessageResponse Escalate(Session s, EscalationReason reason)
     {
+        // Audit every escalation so incidents (especially safeguarding) are
+        // reviewable later. This is the single choke point all escalations pass
+        // through, whether triggered by safety triage, an invalid state, or an
+        // unexpected exception.
+        var level = reason == EscalationReason.Safeguarding ? LogLevel.Warning : LogLevel.Information;
+        _logger.Log(level,
+            "Escalating session {Token} (tenant {TenantId}) from state {State} to staff. Reason={Reason}.",
+            s.Token, s.TenantId, s.State, reason);
+
         s.State = ConversationState.EscalatedToStaff;
         var msg = reason switch
         {

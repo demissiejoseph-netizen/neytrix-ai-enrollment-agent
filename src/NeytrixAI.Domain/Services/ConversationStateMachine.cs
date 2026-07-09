@@ -56,7 +56,11 @@ public static class ConversationStateMachine
         [ConversationState.Greeting] = new() { ConversationState.CollectingGuardianName, ConversationState.AnsweringFaq, ConversationState.EscalatedToStaff },
         [ConversationState.CollectingGuardianName] = new() { ConversationState.CollectingGuardianEmail, ConversationState.EscalatedToStaff },
         [ConversationState.CollectingGuardianEmail] = new() { ConversationState.CollectingGuardianPhone, ConversationState.EscalatedToStaff },
-        [ConversationState.CollectingGuardianPhone] = new() { ConversationState.CollectingGdprConsent, ConversationState.CollectingPlayerName },
+        // GDPR consent is mandatory: the ONLY path out of phone collection is the
+        // consent step. Player intake must never be reachable without first passing
+        // through CollectingGdprConsent, otherwise a future LLM-driven layer could
+        // drive a transition that skips consent (fail-open). Keep this fail-closed.
+        [ConversationState.CollectingGuardianPhone] = new() { ConversationState.CollectingGdprConsent },
         [ConversationState.CollectingGdprConsent] = new() { ConversationState.CollectingPlayerName, ConversationState.SessionEnded },
         [ConversationState.CollectingPlayerName] = new() { ConversationState.CollectingPlayerDob },
         [ConversationState.CollectingPlayerDob] = new() { ConversationState.CollectingPlayerGender },

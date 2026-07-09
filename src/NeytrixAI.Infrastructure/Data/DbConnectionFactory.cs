@@ -15,8 +15,17 @@ public class DbConnectionFactory : IDbConnectionFactory
 
     public DbConnectionFactory(IConfiguration configuration)
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection") 
+        var raw = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("DefaultConnection not found in configuration");
+
+        // Fail fast instead of hanging when the database is unreachable. Explicit
+        // connect/command timeouts and a bounded pool keep a struggling DB from
+        // exhausting request threads. Values already present in configuration win.
+        var builder = new NpgsqlConnectionStringBuilder(raw);
+        if (builder.Timeout == 15) builder.Timeout = 10;                 // 15 = Npgsql default
+        if (builder.CommandTimeout == 30) builder.CommandTimeout = 15;   // 30 = Npgsql default
+        if (!builder.ContainsKey("Maximum Pool Size")) builder.MaxPoolSize = 50;
+        _connectionString = builder.ConnectionString;
     }
 
     public async Task<IDbConnection> CreateConnectionAsync(Guid tenantId, CancellationToken cancellationToken = default)

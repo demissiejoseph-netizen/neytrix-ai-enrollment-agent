@@ -2,6 +2,7 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
+using NeytrixAI.Infrastructure.Resilience;
 
 namespace NeytrixAI.Infrastructure.Adapters;
 
@@ -45,14 +46,17 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
     private readonly Lazy<CalendarService> _calendarServiceFactory;
     private readonly ILogger<GoogleCalendarAdapter> _logger;
     private readonly GoogleCalendarOptions _options;
+    private readonly ResilientExecutor _resilience;
 
     private CalendarService _calendarService => _calendarServiceFactory.Value;
 
     public GoogleCalendarAdapter(
         IOptions<GoogleCalendarOptions> options,
+        ResilientExecutor resilience,
         ILogger<GoogleCalendarAdapter> logger)
     {
         _options = options.Value;
+        _resilience = resilience;
         _logger = logger;
 
         // Built lazily so the service can be constructed (and the rest of the app
@@ -92,9 +96,10 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
             Items = new List<FreeBusyRequestItem> { new() { Id = calendarId } }
         };
 
-        var freeBusy = await _calendarService.Freebusy
-            .Query(freeBusyRequest)
-            .ExecuteAsync(ct);
+        var freeBusy = await _resilience.ExecuteAsync(
+            "gcal.freebusy.query",
+            token => _calendarService.Freebusy.Query(freeBusyRequest).ExecuteAsync(token),
+            ct);
 
         var busyPeriods = freeBusy.Calendars.TryGetValue(calendarId, out var cal)
             ? cal.Busy ?? new List<TimePeriod>()
@@ -166,9 +171,10 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
             }
         };
 
-        var created = await _calendarService.Events
-            .Insert(calEvent, calendarId)
-            .ExecuteAsync(ct);
+        var created = await _resilience.ExecuteAsync(
+            "gcal.events.insert",
+            token => _calendarService.Events.Insert(calEvent, calendarId).ExecuteAsync(token),
+            ct);
 
         _logger.LogInformation(
             "Booked calendar event {EventId} for player {PlayerName}",
@@ -179,7 +185,14 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
 
     public async Task CancelEventAsync(string calendarId, string eventId, CancellationToken ct)
     {
-        await _calendarService.Events.Delete(calendarId, eventId).ExecuteAsync(ct);
+        await _resilience.ExecuteAsync(
+            "gcal.events.delete",
+            async token =>
+            {
+                await _calendarService.Events.Delete(calendarId, eventId).ExecuteAsync(token);
+                return true;
+            },
+            ct);
         _logger.LogInformation("Cancelled calendar event {EventId}", eventId);
     }
 }

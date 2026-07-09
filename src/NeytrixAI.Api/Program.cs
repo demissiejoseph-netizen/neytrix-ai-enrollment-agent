@@ -5,6 +5,7 @@ using NeytrixAI.Domain.Services;
 using NeytrixAI.Infrastructure.Adapters;
 using NeytrixAI.Infrastructure.Data;
 using NeytrixAI.Infrastructure.Data.Repositories;
+using NeytrixAI.Infrastructure.Resilience;
 using NeytrixAI.Infrastructure.Services;
 using Stripe;
 
@@ -30,8 +31,20 @@ builder.Services.AddScoped<IRegistrationRepository, RegistrationRepository>();
 // Domain services
 builder.Services.AddSingleton<EligibilityEngine>();
 
-// External adapters
-builder.Services.AddSingleton(_ => new StripeClient(builder.Configuration["Stripe:SecretKey"] ?? "sk_test_placeholder"));
+// Resilience: shared timeout/retry/circuit-breaker for all outbound third-party
+// calls. Singleton so circuit state is shared across requests.
+builder.Services.AddSingleton(new ResilienceOptions());
+builder.Services.AddSingleton<ResilientExecutor>();
+
+// External adapters. The Stripe SDK gets its own network-level timeout and retry
+// budget in addition to the ResilientExecutor wrapper around the adapter call.
+builder.Services.AddSingleton(_ =>
+{
+    var secretKey = builder.Configuration["Stripe:SecretKey"] ?? "sk_test_placeholder";
+    var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+    var stripeHttpClient = new SystemNetHttpClient(httpClient, maxNetworkRetries: 2);
+    return new StripeClient(secretKey, httpClient: stripeHttpClient);
+});
 builder.Services.AddScoped<IStripeAdapter, StripeAdapter>();
 builder.Services.AddScoped<IGoogleCalendarAdapter, GoogleCalendarAdapter>();
 

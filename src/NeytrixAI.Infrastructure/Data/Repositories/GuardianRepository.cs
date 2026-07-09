@@ -44,6 +44,15 @@ public class GuardianRepository : IGuardianRepository
 
     public async Task<Guid> CreateAsync(Guardian guardian, CancellationToken cancellationToken = default)
     {
+        // Fail-closed GDPR gate at the write path itself (not just the API layer):
+        // a guardian's personal data must never be persisted without recorded
+        // consent. This throws BEFORE any connection is opened, so no data leaves
+        // the process. Callers that legitimately create a guardian must have called
+        // RecordGdprConsent() first.
+        if (guardian.GdprConsentedAt is null)
+            throw new InvalidOperationException(
+                "Cannot store guardian: GDPR consent has not been recorded. Storage is blocked until consent is given.");
+
         using var conn = await _connectionFactory.CreateConnectionAsync(guardian.TenantId, cancellationToken);
         const string sql = @"
             INSERT INTO guardians (id, tenant_id, first_name, last_name, email, phone, preferred_contact, gdpr_consented_at, created_at, updated_at)
