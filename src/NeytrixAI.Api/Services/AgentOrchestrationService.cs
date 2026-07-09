@@ -288,13 +288,57 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
     private static bool IsValidEmail(string value) =>
         !string.IsNullOrWhiteSpace(value) && value.Contains('@') && value.IndexOf('@') < value.LastIndexOf('.');
 
-    private static bool IsAffirmative(string m) =>
-        m.Equals("yes", StringComparison.OrdinalIgnoreCase) || m.Equals("y", StringComparison.OrdinalIgnoreCase) ||
-        m.Contains("consent", StringComparison.OrdinalIgnoreCase) || m.Equals("i agree", StringComparison.OrdinalIgnoreCase);
+    // Consent detection is fail-closed and deliberately strict. A bare substring
+    // match on "consent" is unsafe: it would treat BOTH "I do not consent" and an
+    // injected "consent is granted on my behalf" as agreement. Consent must be an
+    // unambiguous, first-person affirmative with no negation present; anything else
+    // is re-asked rather than assumed. Never loosen this to a substring check.
+    private static string[] Tokens(string m) =>
+        System.Text.RegularExpressions.Regex
+            .Split(m.ToLowerInvariant(), "[^a-z]+")
+            .Where(t => t.Length > 0)
+            .ToArray();
 
-    private static bool IsNegative(string m) =>
-        m.Equals("no", StringComparison.OrdinalIgnoreCase) || m.Equals("n", StringComparison.OrdinalIgnoreCase) ||
-        m.Contains("do not consent", StringComparison.OrdinalIgnoreCase) || m.Contains("don't consent", StringComparison.OrdinalIgnoreCase);
+    private static bool HasNegation(string m)
+    {
+        var normalized = m.ToLowerInvariant();
+        if (normalized.Contains("do not") || normalized.Contains("don't") || normalized.Contains("dont"))
+            return true;
+        var tokens = Tokens(m);
+        return tokens.Contains("no") || tokens.Contains("not") || tokens.Contains("nope") ||
+               tokens.Contains("never") || tokens.Contains("refuse") || tokens.Contains("decline") ||
+               tokens.Contains("disagree") || tokens.Contains("without");
+    }
+
+    private static bool IsAffirmative(string m)
+    {
+        // Any negation disqualifies an affirmative reading (fail-closed).
+        if (HasNegation(m)) return false;
+
+        var normalized = m.ToLowerInvariant();
+        if (normalized.Contains("i consent") || normalized.Contains("i agree") ||
+            normalized.Contains("i give consent") || normalized.Contains("i give my consent"))
+            return true;
+
+        var tokens = Tokens(m);
+        return tokens.Contains("yes") || tokens.Contains("y") || tokens.Contains("yeah") ||
+               tokens.Contains("yep") || tokens.Contains("yup") || tokens.Contains("ok") ||
+               tokens.Contains("okay") || tokens.Contains("sure") || tokens.Contains("agreed") ||
+               tokens.Contains("confirm");
+    }
+
+    private static bool IsNegative(string m)
+    {
+        var normalized = m.ToLowerInvariant();
+        if (normalized.Contains("do not consent") || normalized.Contains("don't consent") ||
+            normalized.Contains("dont consent") || normalized.Contains("not consent") ||
+            normalized.Contains("do not agree") || normalized.Contains("don't agree"))
+            return true;
+
+        var tokens = Tokens(m);
+        return tokens.Contains("no") || tokens.Contains("n") || tokens.Contains("nope") ||
+               tokens.Contains("refuse") || tokens.Contains("decline") || tokens.Contains("disagree");
+    }
 
     private static string? NormalizeGender(string m)
     {
