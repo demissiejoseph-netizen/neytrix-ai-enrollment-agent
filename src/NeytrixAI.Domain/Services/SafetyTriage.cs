@@ -54,6 +54,13 @@ public static class SafetyTriage
     }
 }
 
+/// <summary>
+/// The category of a human hand-off. Categories are kept distinct end-to-end
+/// (structured logs and the persisted <see cref="EscalationRecord"/>) so that
+/// safeguarding, medical, billing, consent, ambiguity and technical failures can
+/// be triaged and audited separately — they are never collapsed into one generic
+/// bucket.
+/// </summary>
 public enum EscalationReason
 {
     None,
@@ -61,5 +68,26 @@ public enum EscalationReason
     Medical,
     Financial,
     Complaint,
-    HumanRequested
+    HumanRequested,
+    // Consent-related hand-off (kept distinct for auditing; the consent-refusal
+    // flow itself ends the session rather than escalating, by design).
+    Consent,
+    // The guardian's response was ambiguous / low-confidence and the agent must
+    // not guess — it escalates instead of silently proceeding with a best guess.
+    AmbiguousResponse,
+    // An unexpected/malformed internal condition (invalid state transition,
+    // unhandled exception, unexpected API result). Fail loud, not silent.
+    TechnicalFailure
 }
+
+/// <summary>
+/// An audit record for a single human hand-off. Persisted per session (in-memory
+/// for the single-instance MVP) and mirrored into structured logs so every
+/// escalation is reviewable with its category, the state it fired from, when it
+/// happened, and a human-readable reason.
+/// </summary>
+public sealed record EscalationRecord(
+    EscalationReason Category,
+    ConversationState TriggeringState,
+    DateTimeOffset Timestamp,
+    string Reason);

@@ -95,9 +95,51 @@ public static class ConversationStateMachine
         return new StateTransitionResult(true, requested);
     }
 
+    /// <summary>
+    /// Fail-loud variant: throws <see cref="InvalidStateTransitionException"/> for
+    /// any transition not declared in the table. Escalation to
+    /// <see cref="ConversationState.EscalatedToStaff"/> is the one explicit
+    /// exception that is always permitted from a non-terminal state — every other
+    /// unlisted transition is rejected so a state can never be silently skipped.
+    /// </summary>
+    public static ConversationState TransitionOrThrow(
+        ConversationState current,
+        ConversationState requested)
+    {
+        if (requested == ConversationState.EscalatedToStaff && !IsTerminal(current))
+            return ConversationState.EscalatedToStaff;
+
+        var result = Transition(current, requested);
+        if (!result.IsValid)
+            throw new InvalidStateTransitionException(current, requested, result.ErrorMessage);
+
+        return result.NewState;
+    }
+
+    public static bool IsAllowed(ConversationState current, ConversationState requested) =>
+        Transition(current, requested).IsValid;
+
     public static bool IsTerminal(ConversationState state) =>
         state is ConversationState.SessionEnded or ConversationState.EscalatedToStaff;
 
     public static bool RequiresEscalation(ConversationState state) =>
         state == ConversationState.EscalatedToStaff;
+}
+
+/// <summary>
+/// Thrown when an unlisted state transition is attempted. Surfacing this loudly
+/// (rather than silently proceeding) is a deliberate fail-closed guarantee: the
+/// orchestrator catches it and routes to a human via the escalation chokepoint.
+/// </summary>
+public sealed class InvalidStateTransitionException : Exception
+{
+    public ConversationState From { get; }
+    public ConversationState To { get; }
+
+    public InvalidStateTransitionException(ConversationState from, ConversationState to, string? detail = null)
+        : base(detail ?? $"Transition from {from} to {to} is not permitted.")
+    {
+        From = from;
+        To = to;
+    }
 }
