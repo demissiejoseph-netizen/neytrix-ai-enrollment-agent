@@ -20,7 +20,7 @@ public interface IStripeAdapter
         string guardianEmail,
         CancellationToken ct);
 
-    StripeEvent ParseWebhookEvent(string payload, string signature, string webhookSecret);
+    Event ParseWebhookEvent(string payload, string signature, string webhookSecret);
 }
 
 public sealed record PaymentLinkResult(
@@ -103,7 +103,7 @@ public sealed class StripeAdapter : IStripeAdapter
             session.Url,
             amountCents,
             currency,
-            session.ExpiresAt ?? DateTimeOffset.UtcNow.AddHours(24));
+            session.ExpiresAt);
     }
 
     public Task<WaiverResult> CreateWaiverLinkAsync(
@@ -121,7 +121,7 @@ public sealed class StripeAdapter : IStripeAdapter
         return Task.FromResult(new WaiverResult(url, expiresAt));
     }
 
-    public StripeEvent ParseWebhookEvent(string payload, string signature, string webhookSecret)
+    public Event ParseWebhookEvent(string payload, string signature, string webhookSecret)
     {
         return EventUtility.ConstructEvent(payload, signature, webhookSecret,
             throwOnApiVersionMismatch: false);

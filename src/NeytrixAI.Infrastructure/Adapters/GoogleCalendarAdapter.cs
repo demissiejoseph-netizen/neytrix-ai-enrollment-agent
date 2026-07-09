@@ -42,9 +42,11 @@ public sealed record BookedEvent(
 
 public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
 {
-    private readonly CalendarService _calendarService;
+    private readonly Lazy<CalendarService> _calendarServiceFactory;
     private readonly ILogger<GoogleCalendarAdapter> _logger;
     private readonly GoogleCalendarOptions _options;
+
+    private CalendarService _calendarService => _calendarServiceFactory.Value;
 
     public GoogleCalendarAdapter(
         IOptions<GoogleCalendarOptions> options,
@@ -53,14 +55,23 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
         _options = options.Value;
         _logger = logger;
 
-        var credential = GoogleCredential
-            .FromJson(_options.ServiceAccountKeyJson)
-            .CreateScoped(CalendarService.Scope.Calendar);
-
-        _calendarService = new CalendarService(new BaseClientService.Initializer
+        // Built lazily so the service can be constructed (and the rest of the app
+        // can run) even when Google Calendar is not yet configured. A missing key
+        // fails only the calendar operation itself, not the whole enrolment flow.
+        _calendarServiceFactory = new Lazy<CalendarService>(() =>
         {
-            HttpClientInitializer = credential,
-            ApplicationName = "Neytrix AI Enrollment Agent"
+            if (string.IsNullOrWhiteSpace(_options.ServiceAccountKeyJson))
+                throw new InvalidOperationException("Google Calendar is not configured (missing ServiceAccountKeyJson).");
+
+            var credential = GoogleCredential
+                .FromJson(_options.ServiceAccountKeyJson)
+                .CreateScoped(CalendarService.Scope.Calendar);
+
+            return new CalendarService(new BaseClientService.Initializer
+            {
+                HttpClientInitializer = credential,
+                ApplicationName = "Neytrix AI Enrollment Agent"
+            });
         });
     }
 

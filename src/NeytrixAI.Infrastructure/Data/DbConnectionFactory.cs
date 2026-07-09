@@ -24,10 +24,15 @@ public class DbConnectionFactory : IDbConnectionFactory
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        // Set RLS context for multi-tenant isolation
+        // Set the RLS tenant context for THIS connection. This is the sole
+        // cross-tenant isolation enforcement point: every query on this connection
+        // is filtered by RLS policies against 'app.tenant_id'. The variable name
+        // MUST match current_setting('app.tenant_id') used by the policies in
+        // db/migrations/001_initial_schema.sql. set_config is used (not SET)
+        // because SET does not accept bound parameters.
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SET app.current_tenant_id = @tenantId";
-        cmd.Parameters.AddWithValue("tenantId", tenantId);
+        cmd.CommandText = "SELECT set_config('app.tenant_id', @tenantId, false)";
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId.ToString()));
         await cmd.ExecuteNonQueryAsync(cancellationToken);
 
         return connection;

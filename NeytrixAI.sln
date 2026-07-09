@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{DED0CA7E-0C5C-4333-9BCE-CF181B4B83D1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Domain", "src\NeytrixAI.Domain\NeytrixAI.Domain.csproj", "{90D05723-C478-4A9D-9FF3-BC8F6833134D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Infrastructure", "src\NeytrixAI.Infrastructure\NeytrixAI.Infrastructure.csproj", "{8354C5CE-8670-4A61-B5D0-0AE78292324D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Api", "src\NeytrixAI.Api\NeytrixAI.Api.csproj", "{60FA1EE8-55BA-4A8F-919A-1148F886E56B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{524AEAA2-FD88-474E-9B4D-19CA05301594}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Tests", "tests\NeytrixAI.Tests\NeytrixAI.Tests.csproj", "{EE561BFD-24F8-4DB0-82AD-6EA37E37340F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{90D05723-C478-4A9D-9FF3-BC8F6833134D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{90D05723-C478-4A9D-9FF3-BC8F6833134D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{90D05723-C478-4A9D-9FF3-BC8F6833134D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{90D05723-C478-4A9D-9FF3-BC8F6833134D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8354C5CE-8670-4A61-B5D0-0AE78292324D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8354C5CE-8670-4A61-B5D0-0AE78292324D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8354C5CE-8670-4A61-B5D0-0AE78292324D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8354C5CE-8670-4A61-B5D0-0AE78292324D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{60FA1EE8-55BA-4A8F-919A-1148F886E56B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{60FA1EE8-55BA-4A8F-919A-1148F886E56B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{60FA1EE8-55BA-4A8F-919A-1148F886E56B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{60FA1EE8-55BA-4A8F-919A-1148F886E56B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EE561BFD-24F8-4DB0-82AD-6EA37E37340F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EE561BFD-24F8-4DB0-82AD-6EA37E37340F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EE561BFD-24F8-4DB0-82AD-6EA37E37340F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EE561BFD-24F8-4DB0-82AD-6EA37E37340F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{90D05723-C478-4A9D-9FF3-BC8F6833134D} = {DED0CA7E-0C5C-4333-9BCE-CF181B4B83D1}
+		{8354C5CE-8670-4A61-B5D0-0AE78292324D} = {DED0CA7E-0C5C-4333-9BCE-CF181B4B83D1}
+		{60FA1EE8-55BA-4A8F-919A-1148F886E56B} = {DED0CA7E-0C5C-4333-9BCE-CF181B4B83D1}
+		{EE561BFD-24F8-4DB0-82AD-6EA37E37340F} = {524AEAA2-FD88-474E-9B4D-19CA05301594}
+	EndGlobalSection
+EndGlobal
