@@ -1,0 +1,33 @@
+# Keep the build context small and free of local/secret artifacts.
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Node / Next.js (the API image does not build the widget)
+widget/
+**/node_modules/
+**/.next/
+**/out/
+
+# Local config / secrets — MUST never be baked into an image
+**/appsettings.Development.json
+**/*.env
+**/.env
+**/.env.local
+*.pfx
+*.key
+
+# VCS / IDE / OS
+.git/
+.github/
+.gitignore
+.vs/
+.vscode/
+*.user
+.DS_Store
+
+# Infra & docs are not needed at runtime
+infra/
+docs/
+README.md
