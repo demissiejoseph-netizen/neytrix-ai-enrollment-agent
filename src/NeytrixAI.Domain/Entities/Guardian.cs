@@ -10,6 +10,13 @@ public sealed class Guardian
     public string? Phone { get; private set; }
     public string PreferredContact { get; private set; } = "email";
     public DateTimeOffset? GdprConsentedAt { get; private set; }
+
+    /// <summary>
+    /// Clerk user id (the token's <c>sub</c> claim) when this guardian signed in
+    /// through Clerk. Null for guardians created anonymously via the widget intake
+    /// flow or entered manually by staff — Clerk auth is optional, not required.
+    /// </summary>
+    public string? ClerkUserId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -26,7 +33,8 @@ public sealed class Guardian
         string lastName,
         string email,
         string? phone = null,
-        string preferredContact = "email")
+        string preferredContact = "email",
+        string? clerkUserId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(firstName);
         ArgumentException.ThrowIfNullOrWhiteSpace(lastName);
@@ -41,9 +49,24 @@ public sealed class Guardian
             Email = email.Trim().ToLowerInvariant(),
             Phone = phone?.Trim(),
             PreferredContact = preferredContact,
+            ClerkUserId = string.IsNullOrWhiteSpace(clerkUserId) ? null : clerkUserId.Trim(),
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
+    }
+
+    /// <summary>
+    /// Attach a Clerk identity to an existing guardian. Idempotent: re-linking the
+    /// same id is a no-op. Does NOT alter consent, contact, or any other field —
+    /// this is purely additive identity plumbing.
+    /// </summary>
+    public void LinkClerkUser(string clerkUserId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(clerkUserId);
+        var trimmed = clerkUserId.Trim();
+        if (ClerkUserId == trimmed) return;
+        ClerkUserId = trimmed;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void RecordGdprConsent()

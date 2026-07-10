@@ -17,6 +17,7 @@ public class GuardianRepository : IGuardianRepository
         id, tenant_id AS TenantId, first_name AS FirstName, last_name AS LastName,
         email, phone, preferred_contact AS PreferredContact,
         gdpr_consented_at AS GdprConsentedAt,
+        clerk_user_id AS ClerkUserId,
         created_at AS CreatedAt, updated_at AS UpdatedAt";
 
     public async Task<Guardian?> GetByIdAsync(Guid tenantId, Guid guardianId, CancellationToken cancellationToken = default)
@@ -33,6 +34,14 @@ public class GuardianRepository : IGuardianRepository
         var sql = $"SELECT {Columns} FROM guardians WHERE email = @Email";
         return await conn.QuerySingleOrDefaultAsync<Guardian>(
             new CommandDefinition(sql, new { Email = email.Trim().ToLowerInvariant() }, cancellationToken: cancellationToken));
+    }
+
+    public async Task<Guardian?> GetByClerkUserIdAsync(Guid tenantId, string clerkUserId, CancellationToken cancellationToken = default)
+    {
+        using var conn = await _connectionFactory.CreateConnectionAsync(tenantId, cancellationToken);
+        var sql = $"SELECT {Columns} FROM guardians WHERE clerk_user_id = @ClerkUserId";
+        return await conn.QuerySingleOrDefaultAsync<Guardian>(
+            new CommandDefinition(sql, new { ClerkUserId = clerkUserId.Trim() }, cancellationToken: cancellationToken));
     }
 
     public async Task<IEnumerable<Guardian>> GetByTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
@@ -55,8 +64,8 @@ public class GuardianRepository : IGuardianRepository
 
         using var conn = await _connectionFactory.CreateConnectionAsync(guardian.TenantId, cancellationToken);
         const string sql = @"
-            INSERT INTO guardians (id, tenant_id, first_name, last_name, email, phone, preferred_contact, gdpr_consented_at, created_at, updated_at)
-            VALUES (@Id, @TenantId, @FirstName, @LastName, @Email, @Phone, @PreferredContact, @GdprConsentedAt, @CreatedAt, @UpdatedAt)
+            INSERT INTO guardians (id, tenant_id, first_name, last_name, email, phone, preferred_contact, gdpr_consented_at, clerk_user_id, created_at, updated_at)
+            VALUES (@Id, @TenantId, @FirstName, @LastName, @Email, @Phone, @PreferredContact, @GdprConsentedAt, @ClerkUserId, @CreatedAt, @UpdatedAt)
             RETURNING id";
         return await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, guardian, cancellationToken: cancellationToken));
     }
@@ -68,7 +77,8 @@ public class GuardianRepository : IGuardianRepository
             UPDATE guardians
             SET first_name = @FirstName, last_name = @LastName, email = @Email,
                 phone = @Phone, preferred_contact = @PreferredContact,
-                gdpr_consented_at = @GdprConsentedAt, updated_at = @UpdatedAt
+                gdpr_consented_at = @GdprConsentedAt, clerk_user_id = @ClerkUserId,
+                updated_at = @UpdatedAt
             WHERE id = @Id";
         await conn.ExecuteAsync(new CommandDefinition(sql, guardian, cancellationToken: cancellationToken));
     }

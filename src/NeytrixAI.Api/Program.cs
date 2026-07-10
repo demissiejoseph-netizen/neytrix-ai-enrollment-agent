@@ -3,6 +3,7 @@ using NeytrixAI.Api.Services;
 using NeytrixAI.Domain.Repositories;
 using NeytrixAI.Domain.Services;
 using NeytrixAI.Infrastructure.Adapters;
+using NeytrixAI.Infrastructure.Auth;
 using NeytrixAI.Infrastructure.Data;
 using NeytrixAI.Infrastructure.Data.Repositories;
 using NeytrixAI.Infrastructure.Resilience;
@@ -19,6 +20,12 @@ builder.Services.AddHttpContextAccessor();
 // Options
 builder.Services.Configure<StripeOptions>(builder.Configuration.GetSection("Stripe"));
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
+builder.Services.Configure<ClerkOptions>(builder.Configuration.GetSection("Clerk"));
+
+// Optional Clerk identity verification (JWT against Clerk's JWKS endpoint).
+// Singletons: the JWKS ConfigurationManager caches/rotates keys across requests.
+builder.Services.AddSingleton<IClerkSigningKeyProvider, ClerkJwksSigningKeyProvider>();
+builder.Services.AddSingleton<IClerkTokenVerifier, ClerkTokenVerifier>();
 
 // Data access
 builder.Services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();
@@ -63,6 +70,10 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 app.UseTenantResolution();
+// Optional: resolve a Clerk identity when a valid bearer token is present. Runs
+// after tenant resolution so guardian resolution has both tenant + identity, and
+// never blocks a request — anonymous sessions proceed unchanged.
+app.UseClerkAuthentication();
 app.MapControllers();
 
 app.Run();

@@ -9,6 +9,10 @@
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.35" />
     <PackageReference Include="Npgsql" Version="8.0.3" />
+    <!-- Clerk session-token (JWT) verification against the tenant's JWKS endpoint. -->
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.1.2" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.1.2" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.1.2" />
     <PackageReference Include="Stripe.net" Version="43.24.0" />
     <PackageReference Include="Google.Apis.Calendar.v3" Version="1.68.0.3520" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />

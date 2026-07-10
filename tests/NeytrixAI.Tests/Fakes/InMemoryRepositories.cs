@@ -23,6 +23,11 @@ public sealed class InMemoryGuardianRepository : IGuardianRepository
         => Task.FromResult(Store.Values.FirstOrDefault(g => g.TenantId == tenantId &&
             string.Equals(g.Email, email.Trim(), StringComparison.OrdinalIgnoreCase)));
 
+    public Task<Guardian?> GetByClerkUserIdAsync(Guid tenantId, string clerkUserId, CancellationToken ct = default)
+        => Task.FromResult(Store.Values.FirstOrDefault(g => g.TenantId == tenantId &&
+            g.ClerkUserId is not null &&
+            string.Equals(g.ClerkUserId, clerkUserId.Trim(), StringComparison.Ordinal)));
+
     public Task<IEnumerable<Guardian>> GetByTenantAsync(Guid tenantId, CancellationToken ct = default)
         => Task.FromResult(Store.Values.Where(g => g.TenantId == tenantId));
 

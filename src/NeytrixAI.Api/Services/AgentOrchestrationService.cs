@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using NeytrixAI.Api.Controllers;
+using NeytrixAI.Api.Middleware;
 using NeytrixAI.Domain.Entities;
 using NeytrixAI.Domain.Repositories;
 using NeytrixAI.Domain.Services;
+using NeytrixAI.Infrastructure.Auth;
 using NeytrixAI.Infrastructure.Services;
 
 namespace NeytrixAI.Api.Services;
@@ -50,11 +52,51 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
         throw new InvalidOperationException("Tenant context is not resolved.");
     }
 
-    public Task<StartSessionResponse> StartSessionAsync(StartSessionRequest request, CancellationToken ct)
+    // Optional Clerk identity for this request, populated by
+    // ClerkAuthenticationMiddleware. Null for the anonymous flow.
+    private ClerkIdentity? TryGetClerkIdentity()
+    {
+        if (_http.HttpContext?.Items.TryGetValue(ClerkAuthenticationMiddleware.ClerkIdentityItemKey, out var value) == true
+            && value is ClerkIdentity identity)
+            return identity;
+        return null;
+    }
+
+    public async Task<StartSessionResponse> StartSessionAsync(StartSessionRequest request, CancellationToken ct)
     {
         var tenantId = RequireTenantId();
         var token = Guid.NewGuid().ToString("N");
         var session = new Session { Token = token, TenantId = tenantId, GuardianEmail = request.GuardianEmail };
+
+        // OPTIONAL Clerk linkage. If the widget attached a verified Clerk session
+        // token, tie this conversation to the guardian's identity from the start.
+        // Everything here is additive — with no Clerk identity the session is
+        // exactly the anonymous session it always was.
+        var clerk = TryGetClerkIdentity();
+        if (clerk is not null)
+        {
+            session.ClerkUserId = clerk.UserId;
+            session.ClerkEmail = clerk.Email;
+            session.ClerkFirstName = clerk.FirstName;
+            session.ClerkLastName = clerk.LastName;
+
+            // Returning Clerk guardian? They already have a (consented) row, so link
+            // the session to it immediately. A brand-new Clerk user has no row yet:
+            // we deliberately do NOT fabricate one here because the fail-closed GDPR
+            // write gate forbids storing a guardian before consent. That row is
+            // created — and stamped with this clerk_user_id — during the normal
+            // consent step of INTAKE (see CollectConsentAsync).
+            var existing = await _guardians.GetByClerkUserIdAsync(tenantId, clerk.UserId, ct);
+            if (existing is not null)
+            {
+                session.GuardianId = existing.Id;
+                session.GuardianAlreadyPersisted = true;
+                _logger.LogInformation(
+                    "Linked session {Token} (tenant {TenantId}) to existing Clerk guardian {GuardianId} at session start.",
+                    token, tenantId, existing.Id);
+            }
+        }
+
         Sessions[token] = session;
 
         const string greeting = "Hi! I can help you enrol your child in one of our programs. " +
@@ -63,7 +105,7 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
         LogTransition(session, ConversationState.CollectingGuardianName, "session_started");
         session.State = ConversationState.CollectingGuardianName;
 
-        return Task.FromResult(new StartSessionResponse(token, greeting, session.State.ToString()));
+        return new StartSessionResponse(token, greeting, session.State.ToString());
     }
 
     public Task<SessionStateResponse?> GetSessionStateAsync(string sessionToken, CancellationToken ct)
@@ -160,13 +202,34 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
     {
         if (IsAffirmative(message))
         {
-            var guardian = Guardian.Create(s.TenantId, s.GuardianFirstName!, s.GuardianLastName!, s.GuardianEmail!, s.GuardianPhone);
+            if (s.GuardianAlreadyPersisted && s.GuardianId is not null)
+            {
+                // Returning Clerk-authenticated guardian: their consented row already
+                // exists and the session is already linked to it (see StartSession).
+                // Do NOT create a second row — the clerk_user_id UNIQUE index would
+                // reject it anyway. Consent remains recorded on the existing row.
+                _logger.LogInformation(
+                    "Re-confirmed consent for already-linked guardian {GuardianId} in session {Token} (tenant {TenantId}).",
+                    s.GuardianId, s.Token, s.TenantId);
+                return Advance(s, ConversationState.CollectingPlayerName, "gdpr_consent_granted",
+                    "Thank you so much. Now let's tell me about your child — what's their full name?");
+            }
+
+            // New guardian (anonymous OR first-time Clerk sign-in). When a verified
+            // Clerk identity is present we stamp clerk_user_id onto the row at
+            // creation, linking identity to the guardian without fabricating any
+            // profile data — the name/email/phone here are the real values just
+            // collected during INTAKE, not placeholders.
+            var guardian = Guardian.Create(
+                s.TenantId, s.GuardianFirstName!, s.GuardianLastName!, s.GuardianEmail!, s.GuardianPhone,
+                clerkUserId: s.ClerkUserId);
             guardian.RecordGdprConsent();
             await _guardians.CreateAsync(guardian, ct);
             s.GuardianId = guardian.Id;
+            s.GuardianAlreadyPersisted = true;
             _logger.LogInformation(
-                "Recorded GDPR consent and stored guardian {GuardianId} in session {Token} (tenant {TenantId}).",
-                guardian.Id, s.Token, s.TenantId);
+                "Recorded GDPR consent and stored guardian {GuardianId} in session {Token} (tenant {TenantId}); clerkLinked={ClerkLinked}.",
+                guardian.Id, s.Token, s.TenantId, s.ClerkUserId is not null);
             return Advance(s, ConversationState.CollectingPlayerName, "gdpr_consent_granted",
                 "Thank you so much. Now let's tell me about your child — what's their full name?");
         }
@@ -410,5 +473,15 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
         public string? PlayerLastName { get; set; }
         public DateOnly? PlayerDob { get; set; }
         public List<EscalationRecord> Escalations { get; } = new();
+
+        // Optional Clerk identity carried through the session (null = anonymous).
+        public string? ClerkUserId { get; set; }
+        public string? ClerkEmail { get; set; }
+        public string? ClerkFirstName { get; set; }
+        public string? ClerkLastName { get; set; }
+
+        // True once a persisted (consented) guardian row backs this session, so the
+        // consent step never creates a duplicate for an already-linked Clerk guardian.
+        public bool GuardianAlreadyPersisted { get; set; }
     }
 }
