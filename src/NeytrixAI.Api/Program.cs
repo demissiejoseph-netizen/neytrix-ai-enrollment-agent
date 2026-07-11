@@ -20,6 +20,17 @@ builder.Services.AddHttpContextAccessor();
 // Options
 builder.Services.Configure<StripeOptions>(builder.Configuration.GetSection("Stripe"));
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
+// Canonical, host-agnostic env var names for the calendar secret + target calendar.
+// Containers/serverless typically inject secrets as flat env vars, so these take
+// precedence over the "GoogleCalendar__*" section binding when present.
+builder.Services.PostConfigure<GoogleCalendarOptions>(opts =>
+{
+    var json = Environment.GetEnvironmentVariable("GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON");
+    if (!string.IsNullOrWhiteSpace(json)) opts.ServiceAccountKeyJson = json;
+
+    var calendarId = Environment.GetEnvironmentVariable("GOOGLE_CALENDAR_ID");
+    if (!string.IsNullOrWhiteSpace(calendarId)) opts.CalendarId = calendarId;
+});
 builder.Services.Configure<ClerkOptions>(builder.Configuration.GetSection("Clerk"));
 
 // Optional Clerk identity verification (JWT against Clerk's JWKS endpoint).

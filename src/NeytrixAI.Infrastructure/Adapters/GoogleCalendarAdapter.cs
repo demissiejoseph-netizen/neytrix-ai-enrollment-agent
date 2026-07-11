@@ -79,12 +79,22 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
         });
     }
 
+    // Prefer a caller-supplied calendar id (e.g. the tenant's own calendar); fall
+    // back to the deployment default from configuration. Both empty is a
+    // misconfiguration and fails closed with a clear message.
+    private string ResolveCalendarId(string calendarId) =>
+        !string.IsNullOrWhiteSpace(calendarId) ? calendarId
+        : !string.IsNullOrWhiteSpace(_options.CalendarId) ? _options.CalendarId
+        : throw new InvalidOperationException(
+            "Google Calendar is not configured (no calendar id supplied and GOOGLE_CALENDAR_ID is unset).");
+
     public async Task<IReadOnlyList<AvailableSlot>> GetAvailableSlotsAsync(
         string calendarId,
         DateOnly weekOf,
         int durationMinutes,
         CancellationToken ct)
     {
+        calendarId = ResolveCalendarId(calendarId);
         var start = weekOf.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var end = start.AddDays(7);
 
@@ -146,6 +156,7 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
         string programName,
         CancellationToken ct)
     {
+        calendarId = ResolveCalendarId(calendarId);
         var startTime = DateTimeOffset.Parse(
             System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(slotId)));
 
@@ -185,6 +196,7 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
 
     public async Task CancelEventAsync(string calendarId, string eventId, CancellationToken ct)
     {
+        calendarId = ResolveCalendarId(calendarId);
         await _resilience.ExecuteAsync(
             "gcal.events.delete",
             async token =>
@@ -199,7 +211,21 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
 
 public sealed class GoogleCalendarOptions
 {
-    public string ServiceAccountKeyJson { get; init; } = default!;
-    public string DefaultLocation { get; init; } = string.Empty;
-    public int DefaultAssessmentDurationMinutes { get; init; } = 60;
+    /// <summary>
+    /// Full service-account key JSON (single escaped string). Injected from the
+    /// environment (see <c>GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON</c>) rather than a
+    /// file path, so container/serverless hosts can supply it as a secret env var.
+    /// Settable so environment overrides can be applied after section binding.
+    /// </summary>
+    public string ServiceAccountKeyJson { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Deployment-default calendar to book into (<c>GOOGLE_CALENDAR_ID</c>). Used
+    /// only when a caller does not supply a calendar id of its own; multi-tenant
+    /// callers pass the tenant's own calendar id, which always takes precedence.
+    /// </summary>
+    public string CalendarId { get; set; } = string.Empty;
+
+    public string DefaultLocation { get; set; } = string.Empty;
+    public int DefaultAssessmentDurationMinutes { get; set; } = 60;
 }
