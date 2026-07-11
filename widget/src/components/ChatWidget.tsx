@@ -17,6 +17,14 @@ interface ChatWidgetProps {
   widgetTitle?: string;
   welcomeMessage?: string;
   position?: 'bottom-right' | 'bottom-left';
+  /**
+   * OPTIONAL. When provided, its resolved value is attached as a
+   * `Authorization: Bearer <token>` header so the backend can link this
+   * conversation to the signed-in guardian. Returning null (or omitting the prop
+   * entirely) keeps the conversation fully anonymous — the backend treats a
+   * missing/invalid token as an unauthenticated session, unchanged.
+   */
+  getToken?: () => Promise<string | null | undefined>;
 }
 
 interface ApiMessage {
@@ -34,6 +42,7 @@ export default function ChatWidget({
   widgetTitle = 'Enrollment Assistant',
   welcomeMessage = 'Hi! I can help you find and enroll in our programs. How can I help today?',
   position = 'bottom-right',
+  getToken,
 }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -56,14 +65,30 @@ export default function ChatWidget({
     }
   }, [isOpen]);
 
+  // Build request headers, attaching the optional Clerk bearer token when a
+  // getToken callback is supplied AND resolves to a value. Any failure to obtain
+  // a token is swallowed so the request still goes out anonymously.
+  const buildHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Tenant-Slug': tenantSlug,
+    };
+    if (getToken) {
+      try {
+        const token = await getToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      } catch {
+        /* stay anonymous on any token error */
+      }
+    }
+    return headers;
+  }, [tenantSlug, getToken]);
+
   const startSession = useCallback(async () => {
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/chat/sessions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Tenant-Slug': tenantSlug,
-        },
+        headers: await buildHeaders(),
         body: JSON.stringify({ channel: 'widget' }),
       });
 
@@ -83,7 +108,7 @@ export default function ChatWidget({
     } catch (err) {
       setError('Unable to connect. Please try again.');
     }
-  }, [apiBaseUrl, tenantSlug, welcomeMessage]);
+  }, [apiBaseUrl, welcomeMessage, buildHeaders]);
 
   const handleOpen = useCallback(() => {
     setIsOpen(true);
@@ -112,10 +137,7 @@ export default function ChatWidget({
         `${apiBaseUrl}/api/v1/chat/sessions/${sessionToken}/messages`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Tenant-Slug': tenantSlug,
-          },
+          headers: await buildHeaders(),
           body: JSON.stringify({ content: content.trim() }),
         }
       );
@@ -138,7 +160,7 @@ export default function ChatWidget({
     } finally {
       setIsLoading(false);
     }
-  }, [sessionToken, isLoading, apiBaseUrl, tenantSlug]);
+  }, [sessionToken, isLoading, apiBaseUrl, buildHeaders]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

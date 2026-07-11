@@ -1,0 +1,25 @@
+# .NET
+bin/
+obj/
+*.user
+
+# Node / Next.js
+node_modules/
+widget/.next/
+widget/out/
+widget/next-env.d.ts
+
+# Local config / secrets
+appsettings.Development.json
+*.env
+.env
+.env.local
+# Service-account / credential key files must NEVER be committed. The app reads
+# Google creds from GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON, not a file on disk.
+*service-account*.json
+*credentials*.json
+*.pem
+*.key
+
+# OS
+.DS_Store

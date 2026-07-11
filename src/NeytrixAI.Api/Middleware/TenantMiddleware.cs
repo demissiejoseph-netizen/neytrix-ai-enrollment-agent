@@ -1,11 +1,12 @@
-using NeytrixAI.Infrastructure.Repositories;
+using NeytrixAI.Domain.Repositories;
 
 namespace NeytrixAI.Api.Middleware;
 
 /// <summary>
-/// Resolves the tenant from the X-Tenant-Slug header, sets app.tenant_id
-/// in the PostgreSQL session so RLS policies apply automatically.
-/// This is the SOLE cross-tenant isolation enforcement point.
+/// Resolves the tenant from the X-Tenant-Slug header and stores it in the
+/// request context. RLS enforcement itself happens per-connection in
+/// DbConnectionFactory (which sets 'app.tenant_id'); this middleware guarantees
+/// no request proceeds without a resolved, active tenant.
 /// </summary>
 public sealed class TenantMiddleware
 {
@@ -61,12 +62,10 @@ public sealed class TenantMiddleware
             return;
         }
 
-        // Store tenant context for downstream use
+        // Store tenant context for downstream use. RLS is enforced per-connection
+        // in DbConnectionFactory using this TenantId.
         context.Items["TenantId"] = tenant.Id;
         context.Items["Tenant"] = tenant;
-
-        // Set PostgreSQL session variable for RLS
-        await tenantRepo.SetTenantSessionAsync(tenant.Id, context.RequestAborted);
 
         await _next(context);
     }

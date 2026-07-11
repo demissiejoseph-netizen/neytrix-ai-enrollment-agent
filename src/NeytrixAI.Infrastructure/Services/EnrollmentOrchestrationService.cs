@@ -1,185 +1,180 @@
 using NeytrixAI.Domain.Entities;
 using NeytrixAI.Domain.Repositories;
+using NeytrixAI.Domain.Services;
 using NeytrixAI.Infrastructure.Adapters;
-using System.Text.Json;
 
 namespace NeytrixAI.Infrastructure.Services;
 
-public class EnrollmentOrchestrationService
+/// <summary>
+/// Application service that executes the enrollment side-effects behind the
+/// typed agent tools. Every method is fail-closed: eligibility is re-checked by
+/// the deterministic <see cref="EligibilityEngine"/> before any registration is
+/// created, duplicates are rejected, and enrollment can only complete once a
+/// waiver is signed and payment is confirmed (enforced by the Registration
+/// aggregate). The conversational agent NEVER writes to the database directly —
+/// it goes through these permissioned operations.
+/// </summary>
+public sealed class EnrollmentOrchestrationService
 {
-    private readonly ITenantRepository _tenantRepository;
-    private readonly IGuardianRepository _guardianRepository;
-    private readonly IPlayerRepository _playerRepository;
-    private readonly IProgramRepository _programRepository;
-    private readonly IRegistrationRepository _registrationRepository;
-    private readonly StripeAdapter _stripeAdapter;
-    private readonly GoogleCalendarAdapter _calendarAdapter;
+    private readonly ITenantRepository _tenants;
+    private readonly IGuardianRepository _guardians;
+    private readonly IPlayerRepository _players;
+    private readonly IProgramRepository _programs;
+    private readonly IRegistrationRepository _registrations;
+    private readonly IStripeAdapter _stripe;
+    private readonly IGoogleCalendarAdapter _calendar;
+    private readonly EligibilityEngine _eligibility;
 
     public EnrollmentOrchestrationService(
-        ITenantRepository tenantRepository,
-        IGuardianRepository guardianRepository,
-        IPlayerRepository playerRepository,
-        IProgramRepository programRepository,
-        IRegistrationRepository registrationRepository,
-        StripeAdapter stripeAdapter,
-        GoogleCalendarAdapter calendarAdapter)
+        ITenantRepository tenants,
+        IGuardianRepository guardians,
+        IPlayerRepository players,
+        IProgramRepository programs,
+        IRegistrationRepository registrations,
+        IStripeAdapter stripe,
+        IGoogleCalendarAdapter calendar,
+        EligibilityEngine eligibility)
     {
-        _tenantRepository = tenantRepository;
-        _guardianRepository = guardianRepository;
-        _playerRepository = playerRepository;
-        _programRepository = programRepository;
-        _registrationRepository = registrationRepository;
-        _stripeAdapter = stripeAdapter;
-        _calendarAdapter = calendarAdapter;
+        _tenants = tenants;
+        _guardians = guardians;
+        _players = players;
+        _programs = programs;
+        _registrations = registrations;
+        _stripe = stripe;
+        _calendar = calendar;
+        _eligibility = eligibility;
     }
 
-    public async Task<string> HandleToolCallAsync(string toolName, Dictionary<string, object> parameters, Guid tenantId)
+    public async Task<IReadOnlyList<ProgramMatch>> MatchProgramsAsync(Guid tenantId, Guid playerId, CancellationToken ct = default)
     {
-        return toolName switch
-        {
-            "search_programs" => await SearchProgramsAsync(parameters, tenantId),
-            "check_eligibility" => await CheckEligibilityAsync(parameters, tenantId),
-            "create_registration" => await CreateRegistrationAsync(parameters, tenantId),
-            "process_payment" => await ProcessPaymentAsync(parameters, tenantId),
-            "book_calendar_event" => await BookCalendarEventAsync(parameters, tenantId),
-            _ => JsonSerializer.Serialize(new { error = "Unknown tool", tool = toolName })
-        };
+        var player = await _players.GetByIdAsync(tenantId, playerId, ct)
+            ?? throw new InvalidOperationException("Player not found.");
+
+        var programs = (await _programs.GetByTenantAsync(tenantId, ct)).ToList();
+        var counts = await BuildEnrollmentCountsAsync(tenantId, programs, ct);
+        return _eligibility.MatchPrograms(player, programs, counts);
     }
 
-    private async Task<string> SearchProgramsAsync(Dictionary<string, object> parameters, Guid tenantId)
+    public async Task<EligibilityResult> CheckEligibilityAsync(Guid tenantId, Guid playerId, Guid programId, CancellationToken ct = default)
     {
-        var programs = await _programRepository.GetActiveAsync(tenantId);
-        
-        // Apply filters if provided
-        if (parameters.ContainsKey("sport_type"))
-        {
-            var sportType = parameters["sport_type"].ToString();
-            programs = programs.Where(p => p.SportType.Equals(sportType, StringComparison.OrdinalIgnoreCase));
-        }
+        var player = await _players.GetByIdAsync(tenantId, playerId, ct);
+        var program = await _programs.GetByIdAsync(tenantId, programId, ct);
 
-        if (parameters.ContainsKey("min_age") && int.TryParse(parameters["min_age"].ToString(), out var minAge))
-        {
-            programs = programs.Where(p => p.MinAge <= minAge && p.MaxAge >= minAge);
-        }
+        // Fail closed: missing data => ineligible, never a silent pass.
+        if (player is null || program is null)
+            return EligibilityResult.Ineligible(new[] { "Player or program could not be found." });
 
-        var result = programs.Select(p => new
-        {
-            id = p.Id,
-            name = p.Name,
-            description = p.Description,
-            sport_type = p.SportType,
-            age_range = $"{p.MinAge}-{p.MaxAge}",
-            price = p.Price,
-            schedule = p.Schedule,
-            location = p.Location
-        });
-
-        return JsonSerializer.Serialize(new { programs = result });
+        var count = await CountActiveEnrollmentsAsync(tenantId, programId, ct);
+        return _eligibility.CheckEligibility(player, program, count);
     }
 
-    private async Task<string> CheckEligibilityAsync(Dictionary<string, object> parameters, Guid tenantId)
+    /// <summary>
+    /// Creates a registration only if the deterministic eligibility check passes.
+    /// Ineligible players are rejected; full programs produce a waitlisted
+    /// registration rather than an enrolled one. Duplicates are rejected.
+    /// </summary>
+    public async Task<Registration> CreateRegistrationAsync(
+        Guid tenantId, Guid guardianId, Guid playerId, Guid programId, CancellationToken ct = default)
     {
-        if (!parameters.ContainsKey("program_id") || !parameters.ContainsKey("player_age"))
-        {
-            return JsonSerializer.Serialize(new { eligible = false, reason = "Missing required parameters" });
-        }
+        if (await _registrations.ExistsAsync(tenantId, playerId, programId, ct))
+            throw new InvalidOperationException("An active registration already exists for this player and program.");
 
-        var programId = Guid.Parse(parameters["program_id"].ToString()!);
-        var playerAge = int.Parse(parameters["player_age"].ToString()!);
+        var eligibility = await CheckEligibilityAsync(tenantId, playerId, programId, ct);
+        if (eligibility.Status == EligibilityStatus.Ineligible)
+            throw new EligibilityException(eligibility.FailureReasons);
 
-        var program = await _programRepository.GetByIdAsync(programId, tenantId);
-        if (program == null)
-        {
-            return JsonSerializer.Serialize(new { eligible = false, reason = "Program not found" });
-        }
+        var isWaitlist = eligibility.Status == EligibilityStatus.WaitlistOnly;
+        int? waitlistPosition = isWaitlist
+            ? (await CountWaitlistedAsync(tenantId, programId, ct)) + 1
+            : null;
 
-        var eligible = playerAge >= program.MinAge && playerAge <= program.MaxAge;
-        var reason = eligible ? "Player meets age requirements" : $"Player must be between {program.MinAge}-{program.MaxAge} years old";
-
-        return JsonSerializer.Serialize(new { eligible, reason, program_name = program.Name });
+        var registration = Registration.Create(tenantId, guardianId, playerId, programId, isWaitlist, waitlistPosition);
+        await _registrations.CreateAsync(registration, ct);
+        return registration;
     }
 
-    private async Task<string> CreateRegistrationAsync(Dictionary<string, object> parameters, Guid tenantId)
+    public async Task<PaymentLinkResult> CreatePaymentLinkAsync(
+        Guid tenantId, Guid registrationId, bool depositOnly, string successUrl, string cancelUrl, CancellationToken ct = default)
     {
-        if (!parameters.ContainsKey("program_id") || !parameters.ContainsKey("player_id"))
-        {
-            return JsonSerializer.Serialize(new { success = false, error = "Missing required parameters" });
-        }
+        var tenant = await _tenants.GetByIdAsync(tenantId, ct)
+            ?? throw new InvalidOperationException("Tenant not found.");
+        if (string.IsNullOrWhiteSpace(tenant.StripeAccountId))
+            throw new InvalidOperationException("Tenant has no connected Stripe account; cannot take payment.");
 
-        var registration = new Registration
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            ProgramId = Guid.Parse(parameters["program_id"].ToString()!),
-            PlayerId = Guid.Parse(parameters["player_id"].ToString()!),
-            Status = "pending",
-            PaymentStatus = "pending",
-            RegistrationDate = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+        var registration = await _registrations.GetByIdAsync(tenantId, registrationId, ct)
+            ?? throw new InvalidOperationException("Registration not found.");
+        if (registration.IsWaitlisted)
+            throw new InvalidOperationException("Waitlisted registrations cannot be paid until a spot opens.");
 
-        var created = await _registrationRepository.CreateAsync(registration);
-        return JsonSerializer.Serialize(new { success = true, registration_id = created.Id });
+        var program = await _programs.GetByIdAsync(tenantId, registration.ProgramId, ct)
+            ?? throw new InvalidOperationException("Program not found.");
+
+        var amountCents = depositOnly && program.DepositCents > 0 ? program.DepositCents : program.PriceCents;
+
+        var result = await _stripe.CreateCheckoutSessionAsync(
+            tenant.StripeAccountId, registrationId, amountCents, program.Currency,
+            successUrl, cancelUrl, depositOnly, ct);
+
+        registration.MarkPaymentPending(result.CheckoutSessionId);
+        await _registrations.UpdateAsync(registration, ct);
+        return result;
     }
 
-    private async Task<string> ProcessPaymentAsync(Dictionary<string, object> parameters, Guid tenantId)
+    public async Task<BookedEvent> BookAssessmentAsync(
+        Guid tenantId, Guid registrationId, string slotId, CancellationToken ct = default)
     {
-        if (!parameters.ContainsKey("registration_id") || !parameters.ContainsKey("amount"))
-        {
-            return JsonSerializer.Serialize(new { success = false, error = "Missing required parameters" });
-        }
+        var tenant = await _tenants.GetByIdAsync(tenantId, ct)
+            ?? throw new InvalidOperationException("Tenant not found.");
+        if (string.IsNullOrWhiteSpace(tenant.GoogleCalendarId))
+            throw new InvalidOperationException("Tenant has no connected Google Calendar; cannot book assessment.");
 
-        var registrationId = Guid.Parse(parameters["registration_id"].ToString()!);
-        var amount = decimal.Parse(parameters["amount"].ToString()!);
+        var registration = await _registrations.GetByIdAsync(tenantId, registrationId, ct)
+            ?? throw new InvalidOperationException("Registration not found.");
+        var program = await _programs.GetByIdAsync(tenantId, registration.ProgramId, ct)
+            ?? throw new InvalidOperationException("Program not found.");
+        var player = await _players.GetByIdAsync(tenantId, registration.PlayerId, ct)
+            ?? throw new InvalidOperationException("Player not found.");
+        var guardian = await _guardians.GetByIdAsync(tenantId, registration.GuardianId, ct)
+            ?? throw new InvalidOperationException("Guardian not found.");
 
-        var registration = await _registrationRepository.GetByIdAsync(registrationId, tenantId);
-        if (registration == null)
-        {
-            return JsonSerializer.Serialize(new { success = false, error = "Registration not found" });
-        }
+        var booked = await _calendar.BookSlotAsync(
+            tenant.GoogleCalendarId, slotId, guardian.FullName, guardian.Email,
+            player.FullName, program.Name, ct);
 
-        // Create Stripe payment intent
-        var paymentIntentId = await _stripeAdapter.CreatePaymentIntentAsync(amount, "usd", new Dictionary<string, string>
-        {
-            { "registration_id", registrationId.ToString() },
-            { "tenant_id", tenantId.ToString() }
-        });
-
-        // Update registration with payment intent
-        registration.StripePaymentIntentId = paymentIntentId;
-        registration.UpdatedAt = DateTime.UtcNow;
-        await _registrationRepository.UpdateAsync(registration);
-
-        return JsonSerializer.Serialize(new { success = true, payment_intent_id = paymentIntentId });
+        registration.MarkAssessmentScheduled();
+        await _registrations.UpdateAsync(registration, ct);
+        return booked;
     }
 
-    private async Task<string> BookCalendarEventAsync(Dictionary<string, object> parameters, Guid tenantId)
+    private async Task<IDictionary<Guid, int>> BuildEnrollmentCountsAsync(
+        Guid tenantId, IEnumerable<Program> programs, CancellationToken ct)
     {
-        if (!parameters.ContainsKey("registration_id") || !parameters.ContainsKey("start_time") || !parameters.ContainsKey("end_time"))
-        {
-            return JsonSerializer.Serialize(new { success = false, error = "Missing required parameters" });
-        }
+        var counts = new Dictionary<Guid, int>();
+        foreach (var program in programs)
+            counts[program.Id] = await CountActiveEnrollmentsAsync(tenantId, program.Id, ct);
+        return counts;
+    }
 
-        var registrationId = Guid.Parse(parameters["registration_id"].ToString()!);
-        var startTime = DateTime.Parse(parameters["start_time"].ToString()!);
-        var endTime = DateTime.Parse(parameters["end_time"].ToString()!);
-        var summary = parameters.ContainsKey("summary") ? parameters["summary"].ToString()! : "Sports Program Session";
+    private async Task<int> CountActiveEnrollmentsAsync(Guid tenantId, Guid programId, CancellationToken ct)
+    {
+        var registrations = await _registrations.GetByProgramAsync(tenantId, programId, ct);
+        return registrations.Count(r => r.Status is not RegistrationStatus.Cancelled and not RegistrationStatus.Waitlisted);
+    }
 
-        var registration = await _registrationRepository.GetByIdAsync(registrationId, tenantId);
-        if (registration == null)
-        {
-            return JsonSerializer.Serialize(new { success = false, error = "Registration not found" });
-        }
+    private async Task<int> CountWaitlistedAsync(Guid tenantId, Guid programId, CancellationToken ct)
+    {
+        var registrations = await _registrations.GetByProgramAsync(tenantId, programId, ct);
+        return registrations.Count(r => r.Status == RegistrationStatus.Waitlisted);
+    }
+}
 
-        // Create calendar event
-        var eventId = await _calendarAdapter.CreateEventAsync(summary, startTime, endTime);
+public sealed class EligibilityException : Exception
+{
+    public IReadOnlyList<string> Reasons { get; }
 
-        // Update registration with calendar event
-        registration.CalendarEventId = eventId;
-        registration.UpdatedAt = DateTime.UtcNow;
-        await _registrationRepository.UpdateAsync(registration);
-
-        return JsonSerializer.Serialize(new { success = true, event_id = eventId });
+    public EligibilityException(IReadOnlyList<string> reasons)
+        : base("Player is not eligible: " + string.Join(" ", reasons))
+    {
+        Reasons = reasons;
     }
 }

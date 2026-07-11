@@ -1,3 +1,4 @@
+using NeytrixAI.Infrastructure.Resilience;
 using Stripe;
 using Stripe.Checkout;
 
@@ -20,7 +21,7 @@ public interface IStripeAdapter
         string guardianEmail,
         CancellationToken ct);
 
-    StripeEvent ParseWebhookEvent(string payload, string signature, string webhookSecret);
+    Event ParseWebhookEvent(string payload, string signature, string webhookSecret);
 }
 
 public sealed record PaymentLinkResult(
@@ -39,14 +40,17 @@ public sealed class StripeAdapter : IStripeAdapter
     private readonly StripeClient _client;
     private readonly ILogger<StripeAdapter> _logger;
     private readonly StripeOptions _options;
+    private readonly ResilientExecutor _resilience;
 
     public StripeAdapter(
         StripeClient client,
         IOptions<StripeOptions> options,
+        ResilientExecutor resilience,
         ILogger<StripeAdapter> logger)
     {
         _client = client;
         _options = options.Value;
+        _resilience = resilience;
         _logger = logger;
     }
 
@@ -92,7 +96,14 @@ public sealed class StripeAdapter : IStripeAdapter
         };
 
         var requestOptions = new RequestOptions { StripeAccount = stripeAccountId };
-        var session = await sessionService.CreateAsync(options, requestOptions, ct);
+
+        // Timeout + bounded retry + circuit breaker. Payment is money-critical, so a
+        // downstream Stripe outage surfaces as ExternalServiceUnavailableException
+        // (caller escalates to a human) rather than a hang or an unhandled crash.
+        var session = await _resilience.ExecuteAsync(
+            "stripe.checkout.create",
+            token => sessionService.CreateAsync(options, requestOptions, token),
+            ct);
 
         _logger.LogInformation(
             "Created Stripe checkout session {SessionId} for registration {RegistrationId}",
@@ -103,7 +114,7 @@ public sealed class StripeAdapter : IStripeAdapter
             session.Url,
             amountCents,
             currency,
-            session.ExpiresAt ?? DateTimeOffset.UtcNow.AddHours(24));
+            session.ExpiresAt);
     }
 
     public Task<WaiverResult> CreateWaiverLinkAsync(
@@ -121,7 +132,7 @@ public sealed class StripeAdapter : IStripeAdapter
         return Task.FromResult(new WaiverResult(url, expiresAt));
     }
 
-    public StripeEvent ParseWebhookEvent(string payload, string signature, string webhookSecret)
+    public Event ParseWebhookEvent(string payload, string signature, string webhookSecret)
     {
         return EventUtility.ConstructEvent(payload, signature, webhookSecret,
             throwOnApiVersionMismatch: false);
