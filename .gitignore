@@ -1,0 +1,25 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+*.pem
+*.key
+*-service-account.json
+gcp-credentials*.json
+
+# Node
+node_modules/
+.next/
+dist/
+
+# OS
+.DS_Store

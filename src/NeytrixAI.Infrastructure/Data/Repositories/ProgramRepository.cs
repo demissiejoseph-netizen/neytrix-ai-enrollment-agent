@@ -98,7 +98,7 @@ public sealed class ProgramRepository : IProgramRepository
                       FROM registrations r
                       WHERE r.tenant_id = @TenantId
                         AND r.program_id = @ProgramId
-                        AND r.status IN ('enrolled', 'pending_payment')
+                        AND r.status IN ('enrolled', 'payment_pending', 'payment_complete')
                   )
             );
             """;

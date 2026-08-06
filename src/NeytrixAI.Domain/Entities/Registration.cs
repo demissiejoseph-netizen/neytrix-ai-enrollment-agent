@@ -9,7 +9,12 @@ public sealed class Registration
 {
     public const string StatusInquiry = "inquiry";
     public const string StatusPendingWaiver = "waiver_sent";
-    public const string StatusPendingPayment = "pending_payment";
+    // NOTE: these must match the registration_status enum in
+    // db/migrations/001_initial_schema.sql exactly. Postgres rejects any other
+    // literal at insert time with error 22P02, so a typo here is a runtime 500,
+    // not a compile error.
+    public const string StatusPendingPayment = "payment_pending";
+    public const string StatusPaymentComplete = "payment_complete";
     public const string StatusEnrolled = "enrolled";
     public const string StatusWaitlisted = "waitlisted";
     public const string StatusCancelled = "cancelled";

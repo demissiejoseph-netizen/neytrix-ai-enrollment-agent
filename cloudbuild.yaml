@@ -1,0 +1,143 @@
+# ---------------------------------------------------------------------------
+# Neytrix AI Enrollment Agent — Cloud Build → Artifact Registry → Cloud Run
+#
+# Wire this to a push trigger on ^main$ with Config = /cloudbuild.yaml.
+#
+# The trigger's build service account needs, at minimum:
+#   roles/run.admin                on the project
+#   roles/iam.serviceAccountUser   on _RUNTIME_SA
+#   roles/artifactregistry.writer  on the repository
+#   roles/logging.logWriter        on the project
+# ---------------------------------------------------------------------------
+
+substitutions:
+  _REGION: us-west1
+  _SERVICE: neytrix-api
+  _REPOSITORY: neytrix
+  _RUNTIME_SA: neytrix-run@$PROJECT_ID.iam.gserviceaccount.com
+  _MIN_INSTANCES: '0'
+  _MAX_INSTANCES: '4'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+  dynamicSubstitutions: true
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest'
+
+steps:
+  # -- 1. Build. Cache from :latest so incremental builds reuse the NuGet layer.
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}"
+        docker pull "$IMAGE:latest" || echo "No cache image yet — first build."
+        docker build \
+          --cache-from "$IMAGE:latest" \
+          --tag "$IMAGE:${SHORT_SHA}" \
+          --tag "$IMAGE:latest" \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          .
+
+  # -- 2. Smoke test the image before it can ever reach Cloud Run.
+  #       /healthz must answer without a database or GCP credentials.
+  - id: smoke-test
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['build']
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}"
+        docker run -d --name neytrix-smoke -p 8080:8080 -e PORT=8080 "$IMAGE"
+        for i in $(seq 1 30); do
+          if docker exec neytrix-smoke curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+            echo "healthz OK after ${i}s"
+            docker rm -f neytrix-smoke
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "Container never became healthy. Logs:"
+        docker logs neytrix-smoke
+        docker rm -f neytrix-smoke
+        exit 1
+
+  # -- 3. Push both tags.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['smoke-test']
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}"
+        docker push "$IMAGE:${SHORT_SHA}"
+        docker push "$IMAGE:latest"
+
+  # -- 4. Deploy. Secrets stay in Secret Manager and are mounted as env vars;
+  #       nothing sensitive appears in this file or in build logs.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: ['push']
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--service-account=${_RUNTIME_SA}'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--cpu=1'
+      - '--memory=1Gi'
+      - '--min-instances=${_MIN_INSTANCES}'
+      - '--max-instances=${_MAX_INSTANCES}'
+      - '--timeout=300'
+      - '--concurrency=80'
+      - '--startup-probe=httpGet.path=/healthz,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6'
+      - >-
+        --set-env-vars=^@^ASPNETCORE_ENVIRONMENT=Production@VertexAI__Location=${_REGION}@VertexAI__ProjectId=$PROJECT_ID@VertexAI__Model=gemini-1.5-pro@GoogleCalendar__RedirectUri=https://REPLACE_WITH_SERVICE_URL/oauth/callback@ALLOWED_ORIGINS=https://REPLACE_WITH_WIDGET_HOST
+      - >-
+        --set-secrets=ConnectionStrings__DefaultConnection=neytrix-db-connection:latest,Stripe__SecretKey=neytrix-stripe-secret-key:latest,Stripe__WebhookSecret=neytrix-stripe-webhook-secret:latest,GoogleCalendar__ClientId=neytrix-gcal-client-id:latest,GoogleCalendar__ClientSecret=neytrix-gcal-client-secret:latest
+      - '--revision-suffix=${SHORT_SHA}'
+
+  # -- 5. Verify the live revision actually serves traffic, and roll back if not.
+  - id: verify
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: ['deploy']
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        URL=$(gcloud run services describe "${_SERVICE}" \
+          --region "${_REGION}" --format 'value(status.url)')
+        echo "Service URL: $URL"
+        for i in $(seq 1 20); do
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/healthz" || echo 000)
+          if [ "$CODE" = "200" ]; then
+            echo "Live revision healthy."
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "New revision is not healthy — rolling traffic back."
+        PREV=$(gcloud run revisions list --service "${_SERVICE}" \
+          --region "${_REGION}" --sort-by '~metadata.creationTimestamp' \
+          --format 'value(metadata.name)' --limit 2 | tail -n 1)
+        gcloud run services update-traffic "${_SERVICE}" \
+          --region "${_REGION}" --to-revisions "$PREV=100"
+        exit 1
+
+timeout: 1800s

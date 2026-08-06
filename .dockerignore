@@ -1,0 +1,50 @@
+# Keep the build context small and secrets out of image layers.
+
+# Build output
+**/bin/
+**/obj/
+**/out/
+**/publish/
+**/TestResults/
+
+# Node / widget — the widget is deployed separately, not in the API image
+widget/node_modules/
+widget/.next/
+widget/dist/
+widget/build/
+**/node_modules/
+
+# Local secrets and env files. Never bake these into a layer.
+.env
+.env.*
+!.env.example
+**/appsettings.Local.json
+**/appsettings.*.Local.json
+*.pem
+*.key
+*.p12
+*-service-account.json
+gcp-credentials*.json
+
+# VCS and tooling
+.git/
+.github/
+.gitignore
+.gitattributes
+.vs/
+.vscode/
+.idea/
+**/*.user
+**/*.suo
+
+# Infrastructure and docs — not needed to compile the API
+infra/
+docs/
+db/
+deploy/
+*.md
+!README.md
+
+# OS noise
+.DS_Store
+Thumbs.db
