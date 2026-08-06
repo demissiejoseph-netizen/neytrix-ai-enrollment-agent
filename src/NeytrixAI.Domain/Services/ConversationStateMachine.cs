@@ -49,7 +49,7 @@ public sealed record StateTransitionResult(
     ConversationState NewState,
     string? ErrorMessage = null);
 
-public static class ConversationStateMachine
+public sealed class ConversationStateMachine
 {
     private static readonly Dictionary<ConversationState, HashSet<ConversationState>> _allowedTransitions = new()
     {

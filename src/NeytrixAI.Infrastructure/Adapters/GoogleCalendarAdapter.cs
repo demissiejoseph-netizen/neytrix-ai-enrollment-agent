@@ -2,6 +2,8 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace NeytrixAI.Infrastructure.Adapters;
 
@@ -175,6 +177,9 @@ public sealed class GoogleCalendarAdapter : IGoogleCalendarAdapter
 
 public sealed class GoogleCalendarOptions
 {
+    public string ClientId { get; init; } = string.Empty;
+    public string ClientSecret { get; init; } = string.Empty;
+    public string RedirectUri { get; init; } = string.Empty;
     public string ServiceAccountKeyJson { get; init; } = default!;
     public string DefaultLocation { get; init; } = string.Empty;
     public int DefaultAssessmentDurationMinutes { get; init; } = 60;

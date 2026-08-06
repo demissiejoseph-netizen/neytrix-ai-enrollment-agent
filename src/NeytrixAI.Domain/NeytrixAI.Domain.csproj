@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>NeytrixAI.Domain</RootNamespace>
+    <AssemblyName>NeytrixAI.Domain</AssemblyName>
+  </PropertyGroup>
+</Project>

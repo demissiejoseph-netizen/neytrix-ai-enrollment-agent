@@ -1,11 +1,11 @@
-using NeytrixAI.Infrastructure.Repositories;
+using NeytrixAI.Domain.Repositories;
 
 namespace NeytrixAI.Api.Middleware;
 
 /// <summary>
 /// Resolves the tenant from the X-Tenant-Slug header, sets app.tenant_id
-/// in the PostgreSQL session so RLS policies apply automatically.
-/// This is the SOLE cross-tenant isolation enforcement point.
+/// on each repository connection so the migration's RLS policies apply automatically.
+/// Repository predicates provide an additional defence in depth check.
 /// </summary>
 public sealed class TenantMiddleware
 {
@@ -22,7 +22,8 @@ public sealed class TenantMiddleware
     {
         // Skip for health checks and webhooks (webhook auth handled separately)
         var path = context.Request.Path.Value ?? string.Empty;
-        if (path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+        if (path.StartsWith("/health", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/ready", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
@@ -65,7 +66,7 @@ public sealed class TenantMiddleware
         context.Items["TenantId"] = tenant.Id;
         context.Items["Tenant"] = tenant;
 
-        // Set PostgreSQL session variable for RLS
+        // Validate the tenant context; each repository connection sets its own RLS variable.
         await tenantRepo.SetTenantSessionAsync(tenant.Id, context.RequestAborted);
 
         await _next(context);

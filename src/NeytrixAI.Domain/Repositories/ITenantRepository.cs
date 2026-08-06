@@ -10,4 +10,5 @@ public interface ITenantRepository
     Task<Guid> CreateAsync(Tenant tenant, CancellationToken cancellationToken = default);
     Task UpdateAsync(Tenant tenant, CancellationToken cancellationToken = default);
     Task<bool> ExistsAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    Task SetTenantSessionAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

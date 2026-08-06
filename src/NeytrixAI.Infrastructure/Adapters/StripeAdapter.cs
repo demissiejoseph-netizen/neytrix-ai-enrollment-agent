@@ -1,5 +1,7 @@
 using Stripe;
 using Stripe.Checkout;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace NeytrixAI.Infrastructure.Adapters;
 
@@ -20,7 +22,7 @@ public interface IStripeAdapter
         string guardianEmail,
         CancellationToken ct);
 
-    StripeEvent ParseWebhookEvent(string payload, string signature, string webhookSecret);
+    Stripe.Event ParseWebhookEvent(string payload, string signature, string webhookSecret);
 }
 
 public sealed record PaymentLinkResult(
@@ -103,7 +105,7 @@ public sealed class StripeAdapter : IStripeAdapter
             session.Url,
             amountCents,
             currency,
-            session.ExpiresAt ?? DateTimeOffset.UtcNow.AddHours(24));
+            session.ExpiresAt is { } expiresAt ? new DateTimeOffset(expiresAt) : DateTimeOffset.UtcNow.AddHours(24));
     }
 
     public Task<WaiverResult> CreateWaiverLinkAsync(
@@ -121,7 +123,7 @@ public sealed class StripeAdapter : IStripeAdapter
         return Task.FromResult(new WaiverResult(url, expiresAt));
     }
 
-    public StripeEvent ParseWebhookEvent(string payload, string signature, string webhookSecret)
+    public Stripe.Event ParseWebhookEvent(string payload, string signature, string webhookSecret)
     {
         return EventUtility.ConstructEvent(payload, signature, webhookSecret,
             throwOnApiVersionMismatch: false);

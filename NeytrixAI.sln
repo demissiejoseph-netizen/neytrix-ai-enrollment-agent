@@ -1,0 +1,41 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{9232A6E0-FB69-46D5-A05B-E98618D868F2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Domain", "src\NeytrixAI.Domain\NeytrixAI.Domain.csproj", "{A55E1E5A-B816-4F40-B2A2-138AADBAC4E0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Infrastructure", "src\NeytrixAI.Infrastructure\NeytrixAI.Infrastructure.csproj", "{426470FC-397C-4E2D-B286-0C1C3AC85B8C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeytrixAI.Api", "src\NeytrixAI.Api\NeytrixAI.Api.csproj", "{B8033DF1-F9E8-4AFD-90AE-DE34C01BE3B4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A55E1E5A-B816-4F40-B2A2-138AADBAC4E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A55E1E5A-B816-4F40-B2A2-138AADBAC4E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A55E1E5A-B816-4F40-B2A2-138AADBAC4E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A55E1E5A-B816-4F40-B2A2-138AADBAC4E0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{426470FC-397C-4E2D-B286-0C1C3AC85B8C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{426470FC-397C-4E2D-B286-0C1C3AC85B8C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{426470FC-397C-4E2D-B286-0C1C3AC85B8C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{426470FC-397C-4E2D-B286-0C1C3AC85B8C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8033DF1-F9E8-4AFD-90AE-DE34C01BE3B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8033DF1-F9E8-4AFD-90AE-DE34C01BE3B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8033DF1-F9E8-4AFD-90AE-DE34C01BE3B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8033DF1-F9E8-4AFD-90AE-DE34C01BE3B4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A55E1E5A-B816-4F40-B2A2-138AADBAC4E0} = {9232A6E0-FB69-46D5-A05B-E98618D868F2}
+		{426470FC-397C-4E2D-B286-0C1C3AC85B8C} = {9232A6E0-FB69-46D5-A05B-E98618D868F2}
+		{B8033DF1-F9E8-4AFD-90AE-DE34C01BE3B4} = {9232A6E0-FB69-46D5-A05B-E98618D868F2}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>NeytrixAI.Infrastructure</RootNamespace>
+    <AssemblyName>NeytrixAI.Infrastructure</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Npgsql" Version="8.0.3" />
+    <PackageReference Include="Pgvector" Version="0.2.0" />
+    <PackageReference Include="Stripe.net" Version="45.14.0" />
+    <PackageReference Include="Google.Apis.Calendar.v3" Version="1.68.0.3428" />
+    <PackageReference Include="Google.Cloud.AIPlatform.V1" Version="3.7.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NeytrixAI.Domain\NeytrixAI.Domain.csproj" />
+  </ItemGroup>
+</Project>
