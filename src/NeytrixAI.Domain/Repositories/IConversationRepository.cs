@@ -7,6 +7,9 @@ public interface IConversationRepository
     Task<Guid> CreateSessionAsync(ConversationSession session, CancellationToken cancellationToken = default);
     Task UpdateSessionAsync(ConversationSession session, CancellationToken cancellationToken = default);
     Task<Guid> AddMessageAsync(ConversationMessage message, CancellationToken cancellationToken = default);
+
+    /// <summary>Loads the full message history for a session in chronological order (oldest first).</summary>
+    Task<IReadOnlyList<ConversationMessage>> GetMessagesAsync(Guid tenantId, Guid sessionId, CancellationToken cancellationToken = default);
 }
 
 public sealed record ConversationSession(

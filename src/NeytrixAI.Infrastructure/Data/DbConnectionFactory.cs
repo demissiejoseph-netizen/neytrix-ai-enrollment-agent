@@ -18,6 +18,20 @@ public sealed class DbConnectionFactory : IDbConnectionFactory
     static DbConnectionFactory()
     {
         Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
+
+        // Dapper 2.1.35 has no built-in DateOnly support in any of its shipped TFM builds (it
+        // throws NotSupportedException the moment a DateOnly value is bound as a query
+        // parameter), even though the referenced entities (Program.StartDate/EndDate,
+        // Player.DateOfBirth) use DateOnly. Without this handler, ProgramRepository and
+        // PlayerRepository CreateAsync/UpdateAsync fail on every real call. Registered once,
+        // globally, since Dapper's type handler cache is process-wide.
+        SqlMapper.AddTypeHandler(typeof(DateOnly), DateOnlyTypeHandler.Instance);
+        SqlMapper.AddTypeHandler(typeof(DateOnly?), DateOnlyTypeHandler.Instance);
+
+        // Tenant.Settings is a Dictionary<string, object> backed by a jsonb column; Npgsql
+        // returns jsonb as a plain string without dynamic-JSON support enabled, and Dapper's
+        // default row mapper can't convert that string to a Dictionary on its own.
+        SqlMapper.AddTypeHandler(typeof(Dictionary<string, object>), JsonDictionaryTypeHandler.Instance);
     }
 
     public DbConnectionFactory(IConfiguration configuration)

@@ -240,33 +240,78 @@ ALTER TABLE conversation_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 
--- App role uses current_setting to identify the tenant
+-- App role uses current_setting to identify the tenant. The `true` (missing_ok) argument
+-- returns NULL instead of raising "unrecognized configuration parameter" when a connection
+-- has not yet called set_config('app.tenant_id', ...) -- NULL fails the equality predicate
+-- and cleanly denies the row, rather than throwing a 500 on the first query of a fresh session.
 CREATE POLICY tenant_isolation_guardians ON guardians
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_players ON players
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_programs ON programs
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_registrations ON registrations
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_assessments ON assessments
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_sessions ON conversation_sessions
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_messages ON conversation_messages
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_knowledge ON knowledge_chunks
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE POLICY tenant_isolation_audit ON audit_log
-  USING (tenant_id = current_setting('app.tenant_id')::UUID);
+  USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
+
+-- `tenants` itself has no tenant_id column -- it IS the directory of tenants, so tenant
+-- resolution (GetBySlugAsync) must run before any tenant is known. It holds no guardian/player
+-- PII (slug, name, timezone, Stripe/Calendar ids, settings) so open SELECT is the correct
+-- posture; mutation is deliberately left ungranted below so provisioning stays an out-of-band
+-- operator action, not something reachable from a request-scoped connection.
+CREATE POLICY tenant_isolation_tenants_select ON tenants
+  FOR SELECT USING (true);
+
+-- ============================================================
+-- APPLICATION ROLE
+-- ============================================================
+-- Least-privilege role the API connects as (see .env.example, which already documented this
+-- role name before it existed). FORCE ROW LEVEL SECURITY is defense in depth: without it, RLS
+-- is skipped entirely for any role that happens to own these tables, silently disabling every
+-- policy above. neytrix_app is never the owner, but forcing keeps that true even if ownership
+-- changes later (e.g. a future migration run as neytrix_app itself).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'neytrix_app') THEN
+    CREATE ROLE neytrix_app LOGIN;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO neytrix_app;
+GRANT SELECT ON tenants TO neytrix_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  guardians, players, programs, registrations, assessments,
+  conversation_sessions, conversation_messages, knowledge_chunks, audit_log
+  TO neytrix_app;
+
+ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
+ALTER TABLE guardians FORCE ROW LEVEL SECURITY;
+ALTER TABLE players FORCE ROW LEVEL SECURITY;
+ALTER TABLE programs FORCE ROW LEVEL SECURITY;
+ALTER TABLE registrations FORCE ROW LEVEL SECURITY;
+ALTER TABLE assessments FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_messages FORCE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_chunks FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
 
 -- ============================================================
 -- UPDATED_AT TRIGGER

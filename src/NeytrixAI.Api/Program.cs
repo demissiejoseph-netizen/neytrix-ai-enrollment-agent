@@ -49,12 +49,14 @@ builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IPlayerRepository, Play
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IProgramRepository, ProgramRepository>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IRegistrationRepository, RegistrationRepository>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IConversationRepository, ConversationRepository>();
+builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IAssessmentRepository, AssessmentRepository>();
+builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IAuditLogRepository, AuditLogRepository>();
 builder.Services.AddSingleton(_ => new Stripe.StripeClient(builder.Configuration["Stripe:SecretKey"] ?? string.Empty));
 builder.Services.AddScoped<IStripeAdapter, StripeAdapter>();
 builder.Services.AddScoped<IGoogleCalendarAdapter, GoogleCalendarAdapter>();
-builder.Services.AddScoped<EnrollmentOrchestrationService>();
 builder.Services.AddSingleton<NeytrixAI.Domain.Services.ConversationStateMachine>();
 builder.Services.AddSingleton<NeytrixAI.Domain.Services.EligibilityEngine>();
+builder.Services.AddScoped<IToolExecutionService, ToolExecutionService>();
 builder.Services.AddScoped<IAgentOrchestrationService, AgentOrchestrationService>();
 
 if (string.IsNullOrWhiteSpace(builder.Configuration["VertexAI:ProjectId"]))

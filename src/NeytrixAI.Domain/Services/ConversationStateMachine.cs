@@ -56,7 +56,7 @@ public sealed class ConversationStateMachine
         [ConversationState.Greeting] = new() { ConversationState.CollectingGuardianName, ConversationState.AnsweringFaq, ConversationState.EscalatedToStaff },
         [ConversationState.CollectingGuardianName] = new() { ConversationState.CollectingGuardianEmail, ConversationState.EscalatedToStaff },
         [ConversationState.CollectingGuardianEmail] = new() { ConversationState.CollectingGuardianPhone, ConversationState.EscalatedToStaff },
-        [ConversationState.CollectingGuardianPhone] = new() { ConversationState.CollectingGdprConsent, ConversationState.CollectingPlayerName },
+        [ConversationState.CollectingGuardianPhone] = new() { ConversationState.CollectingGdprConsent },
         [ConversationState.CollectingGdprConsent] = new() { ConversationState.CollectingPlayerName, ConversationState.SessionEnded },
         [ConversationState.CollectingPlayerName] = new() { ConversationState.CollectingPlayerDob },
         [ConversationState.CollectingPlayerDob] = new() { ConversationState.CollectingPlayerGender },
@@ -90,6 +90,10 @@ public sealed class ConversationStateMachine
 
         return new StateTransitionResult(true, requested);
     }
+
+    /// <summary>The set of states reachable in one hop from <paramref name="current"/>. Used to tell the model which set_stage targets are currently legal, and empty for unknown/terminal states.</summary>
+    public static IReadOnlyCollection<ConversationState> AllowedTransitions(ConversationState current) =>
+        _allowedTransitions.TryGetValue(current, out var allowed) ? allowed : Array.Empty<ConversationState>();
 
     public static bool IsTerminal(ConversationState state) =>
         state is ConversationState.SessionEnded or ConversationState.EscalatedToStaff;

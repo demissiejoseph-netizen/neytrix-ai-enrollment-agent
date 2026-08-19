@@ -66,7 +66,7 @@ public sealed class RegistrationRepository : IRegistrationRepository
             INSERT INTO registrations (id, tenant_id, guardian_id, player_id, program_id, status, waitlist_position,
                                        stripe_payment_intent_id, stripe_checkout_session_id, amount_paid_cents,
                                        waiver_sent_at, waiver_signed_at, enrolled_at, notes, created_at, updated_at)
-            VALUES (@Id, @TenantId, @GuardianId, @PlayerId, @ProgramId, @Status, @WaitlistPosition,
+            VALUES (@Id, @TenantId, @GuardianId, @PlayerId, @ProgramId, CAST(@Status AS registration_status), @WaitlistPosition,
                     @StripePaymentIntentId, @StripeCheckoutSessionId, @AmountPaidCents,
                     @WaiverSentAt, @WaiverSignedAt, @EnrolledAt, @Notes, @CreatedAt, @UpdatedAt)
             RETURNING id;
@@ -79,7 +79,7 @@ public sealed class RegistrationRepository : IRegistrationRepository
         using var connection = await _connectionFactory.CreateConnectionAsync(registration.TenantId, cancellationToken);
         const string sql = """
             UPDATE registrations
-            SET guardian_id = @GuardianId, player_id = @PlayerId, program_id = @ProgramId, status = @Status,
+            SET guardian_id = @GuardianId, player_id = @PlayerId, program_id = @ProgramId, status = CAST(@Status AS registration_status),
                 waitlist_position = @WaitlistPosition, stripe_payment_intent_id = @StripePaymentIntentId,
                 stripe_checkout_session_id = @StripeCheckoutSessionId, amount_paid_cents = @AmountPaidCents,
                 waiver_sent_at = @WaiverSentAt, waiver_signed_at = @WaiverSignedAt, enrolled_at = @EnrolledAt,
