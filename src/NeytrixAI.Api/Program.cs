@@ -42,7 +42,12 @@ builder.Services.AddCors(options => options.AddPolicy("widget", policy =>
 builder.Services.Configure<StripeOptions>(builder.Configuration.GetSection("Stripe"));
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
 
-builder.Services.AddScoped<IDbConnectionFactory, DbConnectionFactory>();
+// Singleton: DbConnectionFactory now owns one shared NpgsqlDataSource (built via
+// NpgsqlDataSourceBuilder().UseVector()) rather than a bare NpgsqlConnection per call - pgvector's
+// Npgsql plugin only registers its type mapping on a specific NpgsqlDataSource (Npgsql 8+ removed
+// the old process-wide GlobalTypeMapper), so every connection must come from that one instance,
+// and rebuilding a whole connection pool per DI scope would defeat pooling anyway.
+builder.Services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.ITenantRepository, TenantRepository>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IGuardianRepository, GuardianRepository>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IPlayerRepository, PlayerRepository>();
@@ -51,6 +56,7 @@ builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IRegistrationRepository
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IConversationRepository, ConversationRepository>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IAssessmentRepository, AssessmentRepository>();
 builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IAuditLogRepository, AuditLogRepository>();
+builder.Services.AddScoped<NeytrixAI.Domain.Repositories.IKnowledgeChunkRepository, NeytrixAI.Infrastructure.Data.Repositories.KnowledgeChunkRepository>();
 builder.Services.AddSingleton(_ => new Stripe.StripeClient(builder.Configuration["Stripe:SecretKey"] ?? string.Empty));
 builder.Services.AddScoped<IStripeAdapter, StripeAdapter>();
 builder.Services.AddScoped<IGoogleCalendarAdapter, GoogleCalendarAdapter>();
@@ -63,6 +69,15 @@ if (string.IsNullOrWhiteSpace(builder.Configuration["VertexAI:ProjectId"]))
     builder.Services.AddSingleton<IAgentModelClient, NullAgentModelClient>();
 else
     builder.Services.AddSingleton<IAgentModelClient, VertexAgentModelClient>();
+
+// GAP-04: real RAG embeddings for answer_faq. Fails closed to NullEmbeddingService (throws
+// EmbeddingUnavailableException, handled by ToolExecutionService.AnswerFaqAsync as an escalation)
+// when Vertex isn't configured, mirroring IAgentModelClient's fallback above.
+if (string.IsNullOrWhiteSpace(builder.Configuration["VertexAI:ProjectId"]))
+    builder.Services.AddSingleton<IEmbeddingService, NullEmbeddingService>();
+else
+    builder.Services.AddSingleton<IEmbeddingService, VertexEmbeddingService>();
+builder.Services.AddScoped<IKnowledgeIngestionService, KnowledgeIngestionService>();
 
 var app = builder.Build();
 

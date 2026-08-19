@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using Dapper;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NeytrixAI.Api.Tools;
@@ -8,7 +7,7 @@ using NeytrixAI.Domain.Entities;
 using NeytrixAI.Domain.Repositories;
 using NeytrixAI.Domain.Services;
 using NeytrixAI.Infrastructure.Adapters;
-using NeytrixAI.Infrastructure.Data;
+using NeytrixAI.Infrastructure.Services;
 
 namespace NeytrixAI.Api.Services;
 
@@ -37,7 +36,8 @@ public sealed class ToolExecutionService : IToolExecutionService
     private readonly IStripeAdapter _stripe;
     private readonly IGoogleCalendarAdapter _calendar;
     private readonly EligibilityEngine _eligibility;
-    private readonly IDbConnectionFactory _connectionFactory;
+    private readonly IKnowledgeChunkRepository _knowledgeChunks;
+    private readonly IEmbeddingService _embeddings;
     private readonly StripeOptions _stripeOptions;
     private readonly GoogleCalendarOptions _calendarOptions;
     private readonly ILogger<ToolExecutionService> _logger;
@@ -54,7 +54,8 @@ public sealed class ToolExecutionService : IToolExecutionService
         IStripeAdapter stripe,
         IGoogleCalendarAdapter calendar,
         EligibilityEngine eligibility,
-        IDbConnectionFactory connectionFactory,
+        IKnowledgeChunkRepository knowledgeChunks,
+        IEmbeddingService embeddings,
         IOptions<StripeOptions> stripeOptions,
         IOptions<GoogleCalendarOptions> calendarOptions,
         ILogger<ToolExecutionService> logger)
@@ -70,7 +71,8 @@ public sealed class ToolExecutionService : IToolExecutionService
         _stripe = stripe;
         _calendar = calendar;
         _eligibility = eligibility;
-        _connectionFactory = connectionFactory;
+        _knowledgeChunks = knowledgeChunks;
+        _embeddings = embeddings;
         _stripeOptions = stripeOptions.Value;
         _calendarOptions = calendarOptions.Value;
         _logger = logger;
@@ -110,47 +112,42 @@ public sealed class ToolExecutionService : IToolExecutionService
     }
 
     // ── answer_faq ──────────────────────────────────────────────
-    // Stopgap keyword search over knowledge_chunks, not real RAG (no embeddings query is run
-    // even though the column exists) - GAP-04 stays open. This exists so the tool loop has a
-    // genuine, working answer_faq path to exercise rather than a stub.
+    // GAP-04: real RAG. Embeds the question (RetrievalQuery task type) and ranks knowledge_chunks
+    // by cosine distance via IKnowledgeChunkRepository.SearchAsync, instead of the old ILIKE
+    // keyword-match stopgap. Fails closed: if embeddings are unavailable (no Vertex config, or a
+    // live call error), or nothing is close enough to trust, this escalates to staff rather than
+    // fabricate an answer.
+    private const double MaxRelevantFaqDistance = 0.6;
+
     private async Task<ToolExecutionResult> AnswerFaqAsync(Guid tenantId, AnswerFaqArgs args, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(args.Question))
             return Error("invalid_arguments", "question is required.");
 
-        var keywords = args.Question
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(w => w.Length > 3)
-            .Select(w => $"%{w}%")
-            .Distinct()
-            .Take(6)
-            .ToArray();
-
-        if (keywords.Length == 0)
+        float[] queryEmbedding;
+        try
+        {
+            queryEmbedding = await _embeddings.EmbedAsync(args.Question, EmbeddingTaskType.RetrievalQuery, ct);
+        }
+        catch (EmbeddingUnavailableException ex)
+        {
+            _logger.LogWarning(ex, "answer_faq embedding unavailable for tenant {TenantId}; escalating to staff", tenantId);
             return Ok(new AnswerFaqResponse(
-                "I don't have enough detail in that question to search our FAQ - could you rephrase, or would you like to speak with staff?",
+                "I'm not able to search our FAQ right now. A staff member can help with this directly.",
                 0.0, true, []));
+        }
 
-        using var connection = await _connectionFactory.CreateConnectionAsync(tenantId, ct);
-        const string sql = """
-            SELECT id, content
-            FROM knowledge_chunks
-            WHERE tenant_id = @TenantId
-              AND source_type IN ('faq','policy')
-              AND content ILIKE ANY(@Patterns)
-            ORDER BY LENGTH(content) ASC
-            LIMIT 3;
-            """;
-        var rows = (await connection.QueryAsync<FaqRow>(
-            new CommandDefinition(sql, new { TenantId = tenantId, Patterns = keywords }, cancellationToken: ct))).ToList();
+        var matches = await _knowledgeChunks.SearchAsync(tenantId, queryEmbedding, new[] { "faq", "policy" }, limit: 3, ct);
+        var relevant = matches.Where(m => m.Distance <= MaxRelevantFaqDistance).ToList();
 
-        if (rows.Count == 0)
+        if (relevant.Count == 0)
             return Ok(new AnswerFaqResponse(
                 "I couldn't find that in our FAQ. A staff member can help with this directly.",
                 0.15, true, []));
 
-        var answer = string.Join("\n\n", rows.Select(r => r.Content));
-        return Ok(new AnswerFaqResponse(answer, 0.5, false, rows.Select(r => r.Id.ToString()).ToArray()));
+        var answer = string.Join("\n\n", relevant.Select(m => m.Content));
+        var confidence = Math.Clamp(1.0 - relevant.Average(m => m.Distance), 0.0, 1.0);
+        return Ok(new AnswerFaqResponse(answer, confidence, false, relevant.Select(m => m.Id.ToString()).ToArray()));
     }
 
     // ── upsert_guardian ──────────────────────────────────────────
@@ -514,9 +511,6 @@ public sealed class ToolExecutionService : IToolExecutionService
             return new System.Text.Json.Nodes.JsonObject();
         }
     }
-
-    /// <summary>Dapper projection row for the answer_faq keyword search (avoids ValueTuple result mapping).</summary>
-    private sealed record FaqRow(Guid Id, string Content);
 
     // ── model-facing argument DTOs (SessionToken excluded; server injects it) ──
     private sealed record AnswerFaqArgs(string? Question);

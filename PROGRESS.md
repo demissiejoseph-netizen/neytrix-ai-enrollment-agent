@@ -36,6 +36,86 @@ way it does without re-deriving it from the diff alone.
 
 ---
 
+## 2026-08-19 — GAP-04: real RAG/embeddings for answer_faq
+
+- **What changed and why**: Replaced `answer_faq`'s ILIKE keyword-search
+  stopgap with real vector-similarity retrieval over `knowledge_chunks`,
+  closing GAP-04. `knowledge_chunks.embedding vector(1536)` and its
+  `ivfflat vector_cosine_ops` index already existed in the schema but were
+  never populated or queried — this wires up the whole path end to end.
+  - `Pgvector.Npgsql`'s `UseVector()` extension only registers its type
+    mapping on a specific `NpgsqlDataSource` (Npgsql 8+ removed the old
+    process-wide `GlobalTypeMapper`), so `DbConnectionFactory` now builds
+    one `NpgsqlDataSourceBuilder(...).UseVector().Build()` in its
+    constructor and hands out connections via
+    `_dataSource.OpenConnectionAsync(...)` instead of bare
+    `new NpgsqlConnection(...)`. Its DI registration moved from `AddScoped`
+    to `AddSingleton` accordingly — rebuilding a whole connection pool per
+    request scope would defeat pooling and is unnecessary since
+    `NpgsqlDataSource` is itself thread-safe. Added a Dapper
+    `SqlMapper.TypeHandler<Pgvector.Vector>` (`VectorTypeHandler.cs`) so
+    `Pgvector.Vector` params/results round-trip through Dapper without
+    Dapper trying to expand the vector's `IEnumerable<float>` into an
+    `IN (...)` list.
+  - New `IEmbeddingService` (`EmbedAsync`/`EmbedBatchAsync`,
+    `EmbeddingTaskType.RetrievalQuery`/`RetrievalDocument`), following the
+    same real-vs-fail-closed pattern as `IAgentModelClient`:
+    `VertexEmbeddingService` calls Vertex AI's `gemini-embedding-001` via
+    `PredictionServiceClient.PredictAsync` (this model accepts only one
+    instance per Predict request, so batch embedding loops one call per
+    text — confirmed against Vertex AI's published API docs, not assumed);
+    `NullEmbeddingService` throws `EmbeddingUnavailableException` rather
+    than fabricate a vector when `VertexAI:ProjectId` isn't configured.
+    `VertexAI:EmbeddingModel` (default `gemini-embedding-001`) and
+    `VertexAI:EmbeddingDimensions` (default `1536`, must match the schema
+    column width) added to `appsettings*.json`.
+  - New `IKnowledgeChunkRepository`/`KnowledgeChunkRepository`: `CreateAsync`
+    for ingestion, `SearchAsync` ranks by cosine distance
+    (`embedding <=> @QueryEmbedding`) matching the existing ivfflat index's
+    operator class. New `KnowledgeChunk` domain entity (embedding as a
+    plain `float[]` at the Domain boundary, keeping the Domain project free
+    of the pgvector/Npgsql package reference).
+  - New `IKnowledgeIngestionService`/`KnowledgeIngestionService`: embeds
+    content with the `RetrievalDocument` task type and stores it via the
+    repository. `knowledge_chunks` ships empty with no seed data anywhere in
+    the repo, so this load-time path (not one of the 11 canonical
+    model-facing tools) is what an operator/seed script uses to populate a
+    tenant's FAQ/policy content — without it, GAP-04 would be unexercisable
+    even though "complete".
+  - `ToolExecutionService.AnswerFaqAsync` rewritten: embeds the question
+    (`RetrievalQuery`), calls `IKnowledgeChunkRepository.SearchAsync` over
+    `source_type IN ('faq','policy')`, keeps matches with cosine distance
+    \<= 0.6, derives `ConfidenceScore` from `1 - distance`. Fails closed on
+    both axes: an `EmbeddingUnavailableException` (Vertex not configured or
+    a live call error) and "nothing close enough" both return
+    `RequiresEscalation: true` with a staff-handoff message rather than
+    guessing. `ToolExecutionService`'s constructor swapped its raw
+    `IDbConnectionFactory` dependency (only ever used for the old keyword
+    query) for `IKnowledgeChunkRepository`/`IEmbeddingService`.
+- **Not done this session**: no bulk/CLI ingestion tool for operators to
+  load a tenant's real FAQ content in production — `IKnowledgeIngestionService`
+  exists and is exercised by tests, but nothing calls it outside test code
+  yet. The Stripe webhook/payment-completion gap remains separately open
+  and untouched.
+- **Verification**: `dotnet build NeytrixAI.sln` — 0 errors (one
+  `CS0104` ambiguous-`Value`-type build error along the way, from
+  `Google.Cloud.AIPlatform.V1.Value` vs `Google.Protobuf.WellKnownTypes.Value`
+  both being in scope, fixed with a `using Value = ...` alias). `dotnet test
+  tests/NeytrixAI.Tests` — 24/24 passing (21 previously-passing + 3 new
+  `AnswerFaqRagTests` cases covering: a close-paraphrase question correctly
+  retrieves the matching seeded chunk and not an unrelated one via a real
+  pgvector `ORDER BY embedding <=> ...` query; a question matching nothing
+  escalates instead of fabricating an answer; embeddings being unavailable
+  (`NullEmbeddingService`) also escalates gracefully instead of throwing).
+  The RAG tests use a deterministic hashed-bag-of-words `FakeEmbeddingService`
+  test double (no live Vertex AI calls in CI/tests) but exercise the real
+  local Postgres, real `knowledge_chunks` table, and real ivfflat-indexed
+  cosine-distance query end to end — same pattern as the existing e2e test
+  faking Stripe/Calendar but never the database. Extracted the e2e test's
+  private `IsPostgresReachableAsync` soft-skip helper into
+  `PostgresTestFixture` as a public static method so the new test class
+  could reuse it instead of duplicating it.
+
 ## 2026-08-19 — Add this progress log and its enforcement
 
 - Added this file and the convention described above.

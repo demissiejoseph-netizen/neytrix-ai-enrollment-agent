@@ -29,6 +29,21 @@ public static class PostgresTestFixture
         Environment.GetEnvironmentVariable("NEYTRIX_TEST_SUPERUSER_CONNECTION")
         ?? "Host=127.0.0.1;Port=5432;Database=neytrix;Username=postgres;Password=postgres_dev_local_pw";
 
+    /// <summary>Soft-skip helper for integration tests: true if the local/CI Postgres from the connection strings above is actually reachable right now.</summary>
+    public static async Task<bool> IsPostgresReachableAsync()
+    {
+        try
+        {
+            await using var connection = new NpgsqlConnection(SuperuserConnectionString);
+            await connection.OpenAsync();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>Builds a real <see cref="IDbConnectionFactory"/> backed by the neytrix_app role, the same one the running API uses (RLS enforced, minimal grants).</summary>
     public static IDbConnectionFactory CreateAppConnectionFactory()
     {

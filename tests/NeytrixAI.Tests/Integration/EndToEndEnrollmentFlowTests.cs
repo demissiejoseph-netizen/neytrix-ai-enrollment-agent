@@ -30,7 +30,7 @@ public sealed class EndToEndEnrollmentFlowTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        if (!await IsPostgresReachableAsync())
+        if (!await PostgresTestFixture.IsPostgresReachableAsync())
             return;
 
         var tenant = Tenant.Create($"e2e-{Guid.NewGuid():N}"[..24], "E2E Test Youth Sports Org");
@@ -77,14 +77,16 @@ public sealed class EndToEndEnrollmentFlowTests : IAsyncLifetime
         var conversations = new ConversationRepository(connectionFactory);
         var assessments = new AssessmentRepository(connectionFactory);
         var auditLog = new AuditLogRepository(connectionFactory);
+        var knowledgeChunks = new KnowledgeChunkRepository(connectionFactory);
 
         var stripeAdapter = new FakeStripeAdapter();
         var calendarAdapter = new FakeGoogleCalendarAdapter();
         var eligibility = new EligibilityEngine();
+        var embeddings = new FakeEmbeddingService();
 
         var toolExecution = new ToolExecutionService(
             guardians, players, programs, registrations, tenants, conversations, assessments, auditLog,
-            stripeAdapter, calendarAdapter, eligibility, connectionFactory,
+            stripeAdapter, calendarAdapter, eligibility, knowledgeChunks, embeddings,
             Options.Create(new StripeOptions
             {
                 SecretKey = "sk_test_fake",
@@ -174,20 +176,6 @@ public sealed class EndToEndEnrollmentFlowTests : IAsyncLifetime
 
         var registrationAssessments = await assessments.GetByRegistrationAsync(_tenantId, registration.Id);
         Assert.Single(registrationAssessments);
-    }
-
-    private static async Task<bool> IsPostgresReachableAsync()
-    {
-        try
-        {
-            await using var connection = new Npgsql.NpgsqlConnection(PostgresTestFixture.SuperuserConnectionString);
-            await connection.OpenAsync();
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private sealed class FixedTenantHttpContextAccessor : IHttpContextAccessor
