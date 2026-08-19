@@ -196,6 +196,19 @@ This is a prototype scaffold. For production:
 4. Implement observability (logging, metrics, tracing)
 5. Add rate limiting and DDoS protection
 
+### Progress log
+
+Every commit that changes application behavior (`src/`, `tests/`,
+`db/migrations/`, or a `.csproj`/`.sln` file) must add a dated entry to
+[PROGRESS.md](PROGRESS.md) in the same commit — see that file for the exact
+format. This is enforced in CI
+(`.github/workflows/require-progress-notes.yml`) and locally via a git hook.
+Enable the local hook once per clone with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## License
 
 Proprietary - Neytrix AI Inc.

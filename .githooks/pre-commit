@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Mirrors .github/workflows/require-progress-notes.yml locally: blocks a
+# commit that touches application code without also touching PROGRESS.md.
+#
+# Enable once per clone with:
+#   git config core.hooksPath .githooks
+#
+# Bypass for a single commit if you're certain it's exempt (formatting-only,
+# etc.) with:
+#   git commit --no-verify
+
+set -euo pipefail
+
+changed="$(git diff --cached --name-only)"
+
+code_changed="$(echo "$changed" | grep -E '^(src/|tests/|db/migrations/)|\.(csproj|sln)$' || true)"
+progress_changed="$(echo "$changed" | grep -E '^PROGRESS\.md$' || true)"
+
+if [ -n "$code_changed" ] && [ -z "$progress_changed" ]; then
+  echo "error: this commit changes application code but does not update PROGRESS.md." >&2
+  echo "Add a dated entry to PROGRESS.md describing what changed and why, then re-stage and commit." >&2
+  echo "" >&2
+  echo "Changed code files:" >&2
+  echo "$code_changed" >&2
+  echo "" >&2
+  echo "(Bypass once with: git commit --no-verify — only for genuinely exempt commits.)" >&2
+  exit 1
+fi
+
+exit 0

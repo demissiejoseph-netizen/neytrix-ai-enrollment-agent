@@ -1,0 +1,66 @@
+name: Require progress notes
+
+# Fails the build if a change touches application code (src/, tests/,
+# db/migrations/, or a .csproj/.sln file) without also updating PROGRESS.md
+# in the same pull request or push. See PROGRESS.md for the convention this
+# enforces and for how to update the local pre-commit hook that mirrors this
+# check before you ever push.
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: ["**"]
+
+jobs:
+  check-progress-log:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed files
+        id: diff
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+            # New branch (before is all zeros) or shallow history: fall back
+            # to the repo's first commit so the diff still resolves.
+            if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              BASE_SHA="$(git rev-list --max-parents=0 HEAD | tail -1)"
+            fi
+          fi
+
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > changed_files.txt
+          echo "Base: $BASE_SHA"
+          echo "Head: $HEAD_SHA"
+          echo "----- changed files -----"
+          cat changed_files.txt
+
+      - name: Verify PROGRESS.md was updated alongside code changes
+        run: |
+          set -euo pipefail
+
+          CODE_CHANGED="$(grep -E '^(src/|tests/|db/migrations/)|\.(csproj|sln)$' changed_files.txt || true)"
+          PROGRESS_CHANGED="$(grep -E '^PROGRESS\.md$' changed_files.txt || true)"
+
+          if [ -n "$CODE_CHANGED" ] && [ -z "$PROGRESS_CHANGED" ]; then
+            {
+              echo "::error::Application code changed under src/, tests/, or db/migrations/ (or a .csproj/.sln file) but PROGRESS.md was not updated in this change."
+              echo "Add a dated entry to PROGRESS.md describing what changed and why, then push again."
+              echo ""
+              echo "Changed code files:"
+              echo "$CODE_CHANGED"
+            } >&2
+            exit 1
+          fi
+
+          echo "OK: either no meaningful code changes, or PROGRESS.md was updated alongside them."
