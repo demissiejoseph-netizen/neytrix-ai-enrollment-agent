@@ -9,7 +9,7 @@ namespace NeytrixAI.Tests.Integration;
 public sealed class FakeStripeAdapter : IStripeAdapter
 {
     public Task<PaymentLinkResult> CreateCheckoutSessionAsync(
-        string stripeAccountId, Guid registrationId, long amountCents, string currency,
+        string stripeAccountId, Guid tenantId, Guid registrationId, long amountCents, string currency,
         string successUrl, string cancelUrl, bool depositOnly, CancellationToken ct) =>
         Task.FromResult(new PaymentLinkResult(
             CheckoutSessionId: $"cs_test_{registrationId:N}",

@@ -191,10 +191,19 @@ public sealed class AgentOrchestrationService : IAgentOrchestrationService
             !Guid.TryParse(registrationIdValue, out var registrationId))
             return;
 
-        // Stripe's existing metadata only contains registration_id. This lookup relies on the
-        // webhook database role being permitted to resolve the registration before its tenant is known.
-        var registration = await _registrations.GetByIdAsync(Guid.Empty, registrationId, ct);
-        if (registration is null)
+        // tenant_id is stamped into Stripe's own metadata at checkout-session creation time
+        // (see StripeAdapter.CreateCheckoutSessionAsync) specifically so this handler never has
+        // to resolve the registration without a tenant context. Falling back to Guid.Empty here
+        // would either bypass row-level security outright (a cross-tenant read) or - with RLS
+        // forced and no session tenant set - silently match zero rows, so a missing/invalid
+        // tenant_id is treated as a malformed event and dropped rather than guessed at.
+        if (!checkout.Metadata.TryGetValue("tenant_id", out var tenantIdValue) ||
+            !Guid.TryParse(tenantIdValue, out var tenantId) ||
+            tenantId == Guid.Empty)
+            return;
+
+        var registration = await _registrations.GetByIdAsync(tenantId, registrationId, ct);
+        if (registration is null || registration.TenantId != tenantId)
             return;
 
         var program = await _programs.GetByIdAsync(registration.TenantId, registration.ProgramId, ct);

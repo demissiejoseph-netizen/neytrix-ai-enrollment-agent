@@ -9,6 +9,7 @@ public interface IStripeAdapter
 {
     Task<PaymentLinkResult> CreateCheckoutSessionAsync(
         string stripeAccountId,
+        Guid tenantId,
         Guid registrationId,
         long amountCents,
         string currency,
@@ -54,6 +55,7 @@ public sealed class StripeAdapter : IStripeAdapter
 
     public async Task<PaymentLinkResult> CreateCheckoutSessionAsync(
         string stripeAccountId,
+        Guid tenantId,
         Guid registrationId,
         long amountCents,
         string currency,
@@ -85,9 +87,16 @@ public sealed class StripeAdapter : IStripeAdapter
             },
             SuccessUrl = successUrl,
             CancelUrl = cancelUrl,
+            // tenant_id travels in Stripe's own metadata so the webhook handler (which fires with
+            // no other context - Stripe never sends our JWT/session headers back) can resolve the
+            // correct tenant *before* touching the database. Without it, the only alternative is
+            // looking the registration up by id with no tenant filter at all, which either bypasses
+            // row-level security entirely (a cross-tenant data leak) or - if RLS is enforced and no
+            // tenant context is set - silently matches zero rows and the payment is never recorded.
             Metadata = new Dictionary<string, string>
             {
                 ["registration_id"] = registrationId.ToString(),
+                ["tenant_id"] = tenantId.ToString(),
                 ["deposit_only"] = depositOnly.ToString()
             },
             ExpiresAt = DateTime.UtcNow.AddHours(24)

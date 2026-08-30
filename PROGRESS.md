@@ -36,6 +36,81 @@ way it does without re-deriving it from the diff alone.
 
 ---
 
+## 2026-08-29 — Stripe webhook end-to-end test + real tenant-resolution bug fix
+
+- **Bug found (production-impacting, not just a test gap)**: The real Stripe
+  webhook handler, `AgentOrchestrationService.HandleStripeWebhookAsync`,
+  resolved the paid registration with
+  `_registrations.GetByIdAsync(Guid.Empty, registrationId, ct)` because
+  Stripe's checkout metadata only ever carried `registration_id` — there was
+  no tenant context available inside the webhook. `DbConnectionFactory
+  .CreateConnectionAsync` only runs `SELECT set_config('app.tenant_id', ...)`
+  `if (tenantId != Guid.Empty)`, so calling it with `Guid.Empty` left
+  `app.tenant_id` completely unset for that connection. The RLS policies in
+  `db/migrations/001_initial_schema.sql` gate every row with
+  `USING (tenant_id = current_setting('app.tenant_id', true)::UUID)`, and
+  `current_setting(..., true)` returns `NULL` when unset — so the predicate
+  evaluated to `NULL` (never `TRUE`) against a real RLS-enforced database.
+  **The webhook's registration lookup would always return zero rows in
+  production**, meaning a real customer's payment would complete on Stripe's
+  side but silently never be recorded — the registration would stay stuck at
+  `payment_pending` forever with no error surfaced anywhere. This was a live
+  bug, not merely "untested" behavior — it just happened to be invisible
+  because the existing e2e test used `FakeStripeAdapter` and never exercised
+  the webhook at all.
+- **Fix**: Threaded a real `tenant_id` through Stripe's own metadata instead
+  of trying to guess it inside the webhook:
+  - `IStripeAdapter.CreateCheckoutSessionAsync` / `StripeAdapter
+    .CreateCheckoutSessionAsync` now take a `Guid tenantId` parameter and add
+    `["tenant_id"] = tenantId.ToString()` to the Stripe Checkout session's
+    `Metadata` alongside the existing `registration_id`/`deposit_only`.
+  - `ToolExecutionService.CreatePaymentLinkAsync` passes the tenant id it
+    already has in scope into the new parameter.
+  - `AgentOrchestrationService.HandleStripeWebhookAsync` now reads
+    `tenant_id` back out of `checkout.Metadata`, `Guid.TryParse`s it, and
+    uses that real tenant for both the registration and program lookups.
+    Fails closed (returns without enrolling, no exception) if `tenant_id` is
+    missing, unparseable, `Guid.Empty`, or doesn't match the tenant the
+    resolved registration actually belongs to — mirroring the existing
+    fail-closed pattern for a missing/invalid `registration_id`.
+  - `FakeStripeAdapter.CreateCheckoutSessionAsync` (test double) updated to
+    match the new signature.
+- **New test coverage**: Added
+  `tests/NeytrixAI.Tests/Integration/StripeWebhookTests.cs`, which seeds a
+  real tenant/guardian/player/program/registration in Postgres (reaching
+  `payment_pending` with a signed waiver, mirroring
+  `EndToEndEnrollmentFlowTests`'s setup), builds a genuine HMAC-SHA256-signed
+  `checkout.session.completed` webhook payload (verified against the actual
+  Stripe.net 45.14.0 `EventConverter` deserialization requirements — a
+  payload missing the top-level `request` field throws a
+  `NullReferenceException` inside `Stripe.Infrastructure.EventConverter
+  .ReadJson`, which unconditionally reads `jsonObject["request"].Type`), and
+  calls the real `AgentOrchestrationService.HandleStripeWebhookAsync` with a
+  real `StripeAdapter` — not a fake — for real signature verification, real
+  tenant resolution, and a real RLS-scoped Postgres write. Four cases:
+  1. A correctly-signed event with matching `tenant_id`/`registration_id`
+     enrolls the registration (`Status` → `enrolled`, `AmountPaidCents`,
+     `StripePaymentIntentId`, `EnrolledAt` all set correctly).
+  2. A forged/tampered signature is rejected by real HMAC verification
+     (`StripeException` thrown) and leaves the registration untouched.
+  3. An event with no `tenant_id` in metadata (the old, pre-fix shape) is
+     dropped without enrolling and without throwing.
+  4. An event whose `tenant_id` doesn't match the registration's real tenant
+     is dropped without enrolling and without throwing.
+  This directly closes the gap called out in `EndToEndEnrollmentFlowTests`,
+  which intentionally stops at `PaymentPending` because it never simulates
+  the webhook — real payment completion was previously untested end to end.
+- **Not done this session**: No change to `ChatController.StripeWebhook`'s
+  error handling — a bad signature still propagates as an unhandled
+  exception to ASP.NET Core's default 500 response rather than a structured
+  4xx. Stripe's retry semantics tolerate this, but a follow-up could catch
+  `StripeException` there and return a deliberate `400` instead.
+- **Verification**: `dotnet build NeytrixAI.sln` — 0 errors (same 6
+  pre-existing cosmetic `NU1603` warnings about `Google.Apis.Calendar.v3`
+  version resolution, unchanged from baseline). `dotnet test
+  tests/NeytrixAI.Tests` — 28/28 passing (24 previously-passing + the 4 new
+  Stripe webhook tests).
+
 ## 2026-08-19 — GAP-04: real RAG/embeddings for answer_faq
 
 - **What changed and why**: Replaced `answer_faq`'s ILIKE keyword-search

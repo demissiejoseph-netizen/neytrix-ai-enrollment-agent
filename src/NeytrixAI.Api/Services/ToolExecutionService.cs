@@ -363,7 +363,7 @@ public sealed class ToolExecutionService : IToolExecutionService
         var successUrl = _stripeOptions.SuccessUrlTemplate.Replace("{registrationId}", registration.Id.ToString());
         var cancelUrl = _stripeOptions.CancelUrlTemplate.Replace("{registrationId}", registration.Id.ToString());
 
-        var result = await _stripe.CreateCheckoutSessionAsync(tenant.StripeAccountId!, registration.Id, amountCents, program.Currency, successUrl, cancelUrl, depositOnly, ct);
+        var result = await _stripe.CreateCheckoutSessionAsync(tenant.StripeAccountId!, tenantId, registration.Id, amountCents, program.Currency, successUrl, cancelUrl, depositOnly, ct);
         registration.AttachCheckoutSession(result.CheckoutSessionId);
         await _registrations.UpdateAsync(registration, ct);
 
