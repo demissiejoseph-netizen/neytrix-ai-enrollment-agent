@@ -13,12 +13,16 @@ WORKDIR /src
 
 # Copy only the project graph first so `dotnet restore` is cached independently
 # of source churn. Any .cs edit will not invalidate the NuGet layer.
-COPY Directory.Build.props NeytrixAI.sln ./
+COPY Directory.Build.props ./
 COPY src/NeytrixAI.Domain/NeytrixAI.Domain.csproj                 src/NeytrixAI.Domain/
 COPY src/NeytrixAI.Infrastructure/NeytrixAI.Infrastructure.csproj src/NeytrixAI.Infrastructure/
 COPY src/NeytrixAI.Api/NeytrixAI.Api.csproj                       src/NeytrixAI.Api/
 
-RUN dotnet restore NeytrixAI.sln
+# Restore only the API project graph (Domain/Infrastructure are pulled in via
+# ProjectReference). The container never needs the test project, and
+# NeytrixAI.sln references tests/NeytrixAI.Tests/NeytrixAI.Tests.csproj, which
+# is intentionally not copied into this build context.
+RUN dotnet restore src/NeytrixAI.Api/NeytrixAI.Api.csproj
 
 # ---------- Stage 2: publish ----------
 FROM restore AS publish
