@@ -4,7 +4,7 @@
 # the Cloud Build trigger exists. After the trigger is wired, prefer pushing to
 # main and letting cloudbuild.yaml do it.
 #
-#   ./deploy/deploy.sh neytrix-prod us-west1
+#   ./deploy/deploy.sh neytrix-502106 us-west1
 #
 # Runs a preflight check first and refuses to deploy if a prerequisite is
 # missing, so you get a clear error instead of a half-created revision.

@@ -5,7 +5,7 @@
 # Idempotent: every step tolerates already-existing resources, so it is safe to
 # re-run after a partial failure.
 #
-#   ./deploy/bootstrap-gcp.sh neytrix-prod us-west1
+#   ./deploy/bootstrap-gcp.sh neytrix-502106 us-west1
 #
 # Prerequisites: gcloud authenticated as a principal with Project Owner (or
 # Service Usage Admin + IAM Admin + Artifact Registry Admin + Secret Manager

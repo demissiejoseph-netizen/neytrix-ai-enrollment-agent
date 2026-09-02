@@ -2,7 +2,7 @@
 
 Everything below runs from your own terminal, authenticated as yourself
 (`gcloud auth login`) with Owner or the equivalent granular roles on
-`neytrix-prod`. I don't have GCP access, so these are the exact commands to
+`neytrix-502106`. I don't have GCP access, so these are the exact commands to
 run, in order — paste the output back to me at any point and I'll tell you
 what's next or help debug.
 
@@ -10,11 +10,11 @@ Target config (already baked into the scripts below):
 
 | | |
 |---|---|
-| Project | `neytrix-prod` |
+| Project | `neytrix-502106` |
 | Region | `us-west1` |
 | Service | `neytrix-api` |
-| Runtime SA | `neytrix-run@neytrix-prod.iam.gserviceaccount.com` |
-| Build SA | `neytrix-build@neytrix-prod.iam.gserviceaccount.com` |
+| Runtime SA | `neytrix-run@neytrix-502106.iam.gserviceaccount.com` |
+| Build SA | `neytrix-build@neytrix-502106.iam.gserviceaccount.com` |
 
 The good news: `deploy/bootstrap-gcp.sh` and `deploy/deploy.sh` already exist
 in the repo (written in an earlier session) and are idempotent — safe to
@@ -38,8 +38,8 @@ pushed.
 
 ```bash
 gcloud auth login                 # if you haven't already
-gcloud config set project neytrix-prod
-gcloud beta billing projects describe neytrix-prod --format='value(billingEnabled)'
+gcloud config set project neytrix-502106
+gcloud beta billing projects describe neytrix-502106 --format='value(billingEnabled)'
 ```
 
 Should print `True`. If not, enable billing in the console before continuing
@@ -48,7 +48,7 @@ Should print `True`. If not, enable billing in the console before continuing
 ## 2. Run the bootstrap script
 
 ```bash
-./deploy/bootstrap-gcp.sh neytrix-prod us-west1
+./deploy/bootstrap-gcp.sh neytrix-502106 us-west1
 ```
 
 This one script does everything in the "final APIs / IAM / secrets" part of
@@ -134,7 +134,7 @@ instance already has the schema from earlier work, skip this.
 ## 5. First deploy
 
 ```bash
-./deploy/deploy.sh neytrix-prod us-west1
+./deploy/deploy.sh neytrix-502106 us-west1
 ```
 
 This runs a preflight (APIs enabled, Dockerfile present, runtime SA exists,
@@ -151,7 +151,7 @@ URL, which only exists after step 5:
 ```bash
 REDIRECT_URI="https://<the-url-from-step-5>/oauth/callback" \
 ALLOWED_ORIGINS="https://your-widget-host" \
-./deploy/deploy.sh neytrix-prod us-west1
+./deploy/deploy.sh neytrix-502106 us-west1
 ```
 
 Also now register the webhook in the Stripe dashboard pointed at
@@ -185,7 +185,7 @@ liner):
      --repo-owner=demissiejoseph-netizen \
      --branch-pattern='^main$' \
      --build-config=cloudbuild.yaml \
-     --service-account=projects/neytrix-prod/serviceAccounts/neytrix-build@neytrix-prod.iam.gserviceaccount.com
+     --service-account=projects/neytrix-502106/serviceAccounts/neytrix-build@neytrix-502106.iam.gserviceaccount.com
    ```
 
 3. Run it once manually to confirm it goes green before relying on it:
