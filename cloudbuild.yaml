@@ -125,7 +125,12 @@ steps:
           --region "${_REGION}" --format 'value(status.url)')
         echo "Service URL: $URL"
         for i in $(seq 1 20); do
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/healthz" || echo 000)
+          # /healthz is intentionally not used here: Google's Cloud Run edge
+          # intercepts that literal path on public *.run.app URLs and never
+          # forwards the request to the container. /health/live is a
+          # differently-named endpoint that reaches the app the same way
+          # /readyz and every other route do.
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health/live" || echo 000)
           if [ "$CODE" = "200" ]; then
             echo "Live revision healthy."
             exit 0

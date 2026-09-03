@@ -141,7 +141,17 @@ This runs a preflight (APIs enabled, Dockerfile present, runtime SA exists,
 every secret has a version) and then `gcloud run deploy --source .` — Cloud
 Build packages the local source, builds the container, and deploys it as
 `neytrix-api` in `us-west1`, running as `neytrix-run`. It then polls
-`/healthz` and `/readyz` and reports the live URL.
+`/health/live` and `/readyz` and reports the live URL.
+
+> Note: the app also exposes `/healthz`, but Google's Cloud Run edge
+> intercepts that exact path on public `*.run.app` URLs and answers with its
+> own generic 404 without ever forwarding the request to the container —
+> confirmed by the absence of the `x-cloud-trace-context` response header
+> that every other path (including `/readyz`) carries. `/healthz` still works
+> for internal-only checks that don't cross the public edge (the Cloud Build
+> smoke test inside the build container, and Cloud Run's own
+> `--startup-probe`), but anything hitting the public URL should use
+> `/health/live` instead.
 
 ## 6. Fix the two chicken-and-egg env vars, then redeploy
 

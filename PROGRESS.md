@@ -36,6 +36,50 @@ way it does without re-deriving it from the diff alone.
 
 ---
 
+## 2026-09-03 — Add /health/live: Cloud Run edge silently swallows public /healthz
+
+- **Bug found**: after the first successful Cloud Run deploy
+  (`neytrix-api-00001-hcr`, `Ready: True`, serving 100% traffic), the
+  deploy script's own polling loop never saw `/healthz` return 200 on the
+  public `https://neytrix-api-*.run.app` URL — it consistently returned
+  Google's generic branded 404 "robot" page, 10/10 attempts across a
+  50-second retry window (ruling out propagation lag).
+- **Root cause**: isolated by comparing response headers across paths on
+  the same host. `/readyz` (`MapHealthChecks`), `/` and a random bogus path
+  (both hit `TenantMiddleware` and return the app's own
+  `X-Tenant-Slug header is required` JSON) all carried an
+  `x-cloud-trace-context` header and `server: Google Frontend`, proving the
+  request reached the container. `/healthz` never carried that header —
+  the request was answered by Google's edge/frontend layer and never
+  forwarded to the container at all. This appears to be edge-level special
+  handling of the literal `/healthz` path on public `*.run.app` URLs;
+  nothing in `Program.cs` or `TenantMiddleware.cs` treats `/healthz`
+  differently from `/readyz` (both are already exempted from tenant
+  resolution), so this is not an application bug.
+- **Fix**: added a second, differently-named endpoint,
+  `app.MapGet("/health/live", () => Results.Ok())`, in `Program.cs`
+  (shares the `/health` prefix so `TenantMiddleware`'s existing bypass still
+  applies). `/healthz` is left in place for internal-only checks that never
+  cross the public edge (the `cloudbuild.yaml` smoke-test step, which curls
+  `127.0.0.1` inside the build container, and Cloud Run's own
+  `--startup-probe`, evaluated by the control plane directly). Repointed
+  every check that hits the *public* URL to `/health/live`:
+  `deploy/deploy.sh`'s polling loop, and the `verify` step in
+  `cloudbuild.yaml` (this was about to cause every future CI-triggered
+  deploy to falsely detect "unhealthy" and auto-rollback a working
+  revision — caught before the Cloud Build GitHub trigger was ever wired
+  up). Documented the finding in `deploy/GCP_SETUP_RUNBOOK.md`.
+- **Not done this session**: `/readyz` still reports `503 Unhealthy` because
+  `PostgresReadinessHealthCheck` can't reach the DB yet — the
+  `neytrix-db-connection` secret still needs a verified, working Supabase
+  connection string and the `db/migrations/001_initial_schema.sql` schema
+  applied. Not yet redeployed to Cloud Run with this fix.
+- **Verification**: `dotnet build NeytrixAI.sln --configuration Release` —
+  0 errors, same 6 pre-existing cosmetic `NU1603` warnings as baseline.
+  `dotnet test NeytrixAI.sln --configuration Release --no-build` — 28/28
+  passing (no test exercises `/healthz` or `/health/live` directly; this is
+  an infra/routing fix, not app-logic).
+
 ## 2026-08-29 — Stripe webhook end-to-end test + real tenant-resolution bug fix
 
 - **Bug found (production-impacting, not just a test gap)**: The real Stripe

@@ -104,9 +104,9 @@ URL=$(gcloud run services describe "$SERVICE" --region "$REGION" \
 echo "    Service URL: $URL"
 
 for i in $(seq 1 20); do
-  CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/healthz" || echo 000)
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health/live" || echo 000)
   if [[ "$CODE" == "200" ]]; then
-    ok "/healthz returned 200"
+    ok "/health/live returned 200"
     break
   fi
   sleep 3
@@ -114,7 +114,7 @@ done
 
 if [[ "${CODE:-000}" != "200" ]]; then
   echo
-  echo "Service deployed but /healthz never returned 200. Recent logs:" >&2
+  echo "Service deployed but /health/live never returned 200. Recent logs:" >&2
   gcloud run services logs read "$SERVICE" --region "$REGION" --limit 50 >&2
   exit 1
 fi
